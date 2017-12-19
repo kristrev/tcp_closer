@@ -13,6 +13,7 @@ static void output_filter(struct tcp_closer_ctx *ctx)
     uint16_t num_ops = ctx->diag_filter_len / sizeof(struct inet_diag_bc_op);
     uint16_t i;
 
+    fprintf(stdout, "Content of INET_DIAG filter:\n");
     for (i = 0; i < num_ops; i++) {
         fprintf(stdout, "diag_filter[%u]->code = %s\n", i,
                 inet_diag_op_code_str[ctx->diag_filter[i].code]);
@@ -48,6 +49,10 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
     //According to the getopt man-page, this is the correct way to trigger a
     //reset of the variables/values used by getopt_long.
     optind = 0;
+    //Do not log errors. We only care about sport/dport here, so there might be
+    //"unknown" options that will trigger ouput and confuse user. We also know
+    //all options are correct, parse_cmdargs() does the validation
+    opterr = 0;
 
     while ((opt = getopt_long(argc, argv, "s:d:", long_options, NULL)) != -1) {
         if (opt != 's' && opt != 'd') {
@@ -109,7 +114,7 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
 
 //Counts config ports and returns false if any unknown options is found
 static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
-                          uint16_t *num_dport)
+                          uint16_t *num_dport, struct tcp_closer_ctx *ctx)
 {
     int opt, option_index;
     bool error = false;
@@ -117,12 +122,13 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
     struct option long_options[] = {
         {"sport",       required_argument,  NULL,   's'},
         {"dport",       required_argument,  NULL,   'd'},
+        {"verbose",     no_argument,        NULL,   'v'},
         {"help",        required_argument,  NULL,   'h'},
         {"kill_only",   no_argument,        NULL,    0 },   
         {0,             0,                  0,       0 }
     };
 
-    while (!error && (opt = getopt_long(argc, argv, "s:d:h", long_options,
+    while (!error && (opt = getopt_long(argc, argv, "s:d:vh", long_options,
                                         &option_index)) != -1) {
         switch (opt) {
         case 0:
@@ -145,6 +151,9 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             } else {
                 (*num_dport)++;
             }
+            break;
+        case 'v':
+            ctx->verbose_mode = true;
             break;
         case 'h':
         default:
@@ -174,6 +183,7 @@ static void show_help()
     fprintf(stdout, "Following arguments are supported:\n");
     fprintf(stdout, "\t-s/--sport : source port to match\n");
     fprintf(stdout, "\t-d/--dport : destionation port to match\n");
+    fprintf(stdout, "\t-v/--verbose : More verbose output\n");
     fprintf(stdout, "\t-h/--help : This output\n");
     fprintf(stdout, "\n");
     fprintf(stdout, "At least one source or destination port must be given.\n"
@@ -195,22 +205,22 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    ctx = calloc(sizeof(struct tcp_closer_ctx), 1);
+    if (!ctx) {
+        fprintf(stderr, "Failed to allocate memory for context-object\n");
+        return 1;
+    }
+
     //Parse options and count number of source ports/destination ports. We need
     //to know the count before we create the filter, so that we can compute the
     //correct offset for the different operations, etc.
-    if (!parse_cmdargs(argc, argv, &num_sport, &num_dport)) {
+    if (!parse_cmdargs(argc, argv, &num_sport, &num_dport, ctx)) {
         show_help();
         return 1;
     }
 
     fprintf(stdout, "# source ports: %u # destination ports: %u\n", num_sport,
             num_dport);
-
-    ctx = calloc(sizeof(struct tcp_closer_ctx), 1);
-    if (!ctx) {
-        fprintf(stderr, "Failed to allocate memory for context-object\n");
-        return 1;
-    }
 
     //Since there is no equal operator, a port comparison will requires four
     //bc_op-structs. Two for LE (since ports is kept in a second struct) and two
@@ -225,7 +235,9 @@ int main(int argc, char *argv[])
 
     create_filter(argc, argv, ctx, num_sport, num_dport);
 
-    output_filter(ctx);
+    if (ctx->verbose_mode) {
+        output_filter(ctx);
+    }
 
     return 0;
 }

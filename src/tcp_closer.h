@@ -47,6 +47,8 @@ struct tcp_closer_ctx {
     struct inet_diag_bc_op *diag_filter;
 
     uint32_t diag_filter_len;
+
+    bool verbose_mode;
 };
 
 #endif
