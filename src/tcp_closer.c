@@ -51,6 +51,8 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     rta.rta_len = RTA_LENGTH(ctx->diag_filter_len);
     nlh.nlmsg_len += rta.rta_len;
 
+    printf("Data len is %u\n", rta.rta_len - sizeof(rta));
+
     iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
     iov[1] = (struct iovec) {&conn_req, sizeof(conn_req)};
     iov[2] = (struct iovec) {&rta, sizeof(rta)};
@@ -136,7 +138,9 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
     uint16_t *diag_cur_idx, *diag_cur_num, diag_cur_count;
     uint8_t code_ge, code_le;
 
-    int opt;
+    //The filter is never allowed to return something lager than cur_len + 4, so
+    //we need to keep how much is left of the filter around
+    int opt, filter_left = ctx->diag_filter_len;
     struct option long_options[] = {
         {"sport",   required_argument, NULL,   's'},
         {"dport",   required_argument, NULL,   'd'},
@@ -179,11 +183,14 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
         diag_cur_ops[*diag_cur_idx].code = code_ge;
         diag_cur_ops[*diag_cur_idx].yes = sizeof(struct inet_diag_bc_op) * 2;
         diag_cur_ops[*diag_cur_idx].no = *diag_cur_num == diag_cur_count ?
-                                           ctx->diag_filter_len + 4 :
+                                           filter_left + 4 :
                                            sizeof(struct inet_diag_bc_op)
                                            * 4;
         diag_cur_ops[(*diag_cur_idx) + 1].code = INET_DIAG_BC_NOP;
+        diag_cur_ops[(*diag_cur_idx) + 1].yes = sizeof(struct inet_diag_bc_op);
         diag_cur_ops[(*diag_cur_idx) + 1].no = atoi(optarg);
+
+        filter_left -= (sizeof(struct inet_diag_bc_op) * 2);
 
         //Same as above. Here, yes is interesting. We can jump straight to
         //dports. This means offset is sizeof() * 2 to pass this block.
@@ -198,14 +205,17 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
                                              (diag_cur_count - *diag_cur_num));
         diag_cur_ops[(*diag_cur_idx) + 2].no =
                                             *diag_cur_num == diag_cur_count ?
-                                            ctx->diag_filter_len + 4 :
+                                            filter_left + 4 :
                                             sizeof(struct inet_diag_bc_op)
                                             * 2;
         diag_cur_ops[*(diag_cur_idx) + 3].code = INET_DIAG_BC_NOP;
+        diag_cur_ops[(*diag_cur_idx) + 3].yes = sizeof(struct inet_diag_bc_op);
         diag_cur_ops[*(diag_cur_idx) + 3].no = atoi(optarg);
 
         (*diag_cur_idx) += 4;
         (*diag_cur_num) += 1;
+
+        filter_left -= (sizeof(struct inet_diag_bc_op) * 2);
     }
 }
 
