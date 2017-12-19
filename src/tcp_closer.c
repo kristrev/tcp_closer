@@ -4,9 +4,106 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <linux/inet_diag.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/in.h>
+#include <linux/sock_diag.h>
 
 #include "tcp_closer.h"
+
+static int send_diag_msg(struct tcp_closer_ctx *ctx)
+{
+    struct msghdr msg = {0};
+    struct nlmsghdr nlh = {0};
+    struct inet_diag_req_v2 conn_req = {0};
+    struct sockaddr_nl sa = {0};
+    struct iovec iov[4];
+    int retval = 0;
+    struct rtattr rta = {0};
+
+    //No need to specify groups or pid. This message only has one receiver and
+    //pid 0 is kernel
+    sa.nl_family = AF_NETLINK;
+
+    //TODO: Provide this as a flag to the application, 4, 6 or both
+    conn_req.sdiag_family = AF_INET;
+    //We only care about TCP
+    conn_req.sdiag_protocol = IPPROTO_TCP;
+
+    //We want TCP connections in all states
+    //TODO: Check if we can reduce to ESTABLISHED
+    conn_req.idiag_states = TCPF_ALL;
+
+    //Request extended TCP information (it is the tcp_info struct)
+    conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
+
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(conn_req));
+    nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST | NLM_F_ACK;
+    nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+
+    memset(&rta, 0, sizeof(rta));
+    rta.rta_type = INET_DIAG_REQ_BYTECODE;
+    rta.rta_len = RTA_LENGTH(ctx->diag_filter_len);
+    nlh.nlmsg_len += rta.rta_len;
+
+    iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
+    iov[1] = (struct iovec) {&conn_req, sizeof(conn_req)};
+    iov[2] = (struct iovec) {&rta, sizeof(rta)};
+    iov[3] = (struct iovec) {ctx->diag_filter, ctx->diag_filter_len};
+
+    msg.msg_name = (void*) &sa;
+    msg.msg_namelen = sizeof(sa);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 4;
+
+    retval = sendmsg(ctx->diag_dump_socket, &msg, 0);
+
+    return retval;
+}
+
+static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
+{
+    struct nlmsghdr *nlh;
+    struct nlmsgerr *err;
+    uint8_t recv_buf[SOCKET_BUFFER_SIZE];
+    struct inet_diag_msg *diag_msg;
+    int32_t numbytes;
+
+    while(1){
+        numbytes = recv(ctx->diag_dump_socket, recv_buf, sizeof(recv_buf), 0);
+        nlh = (struct nlmsghdr*) recv_buf;
+
+        while(NLMSG_OK(nlh, numbytes)){
+            if(nlh->nlmsg_type == NLMSG_DONE) {
+                fprintf(stdout, "Done dumping socket information\n");
+                return 0;
+            }
+
+            if(nlh->nlmsg_type == NLMSG_ERROR){
+                err = NLMSG_DATA(nlh);
+
+                if (err->error) {
+                    fprintf(stderr, "Error in netlink message: %s (%u)\n",
+                            strerror(-err->error), -err->error);
+                    return 1;
+                }
+            }
+
+            fprintf(stdout, "Got a diag msg\n");
+            /*
+            diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
+            rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
+            parse_diag_msg(diag_msg, rtalen);*/
+
+            nlh = NLMSG_NEXT(nlh, numbytes);
+        }
+    }
+}
 
 static void output_filter(struct tcp_closer_ctx *ctx)
 {
@@ -82,7 +179,7 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
         diag_cur_ops[*diag_cur_idx].code = code_ge;
         diag_cur_ops[*diag_cur_idx].yes = sizeof(struct inet_diag_bc_op) * 2;
         diag_cur_ops[*diag_cur_idx].no = *diag_cur_num == diag_cur_count ?
-                                           0xFFFF :
+                                           ctx->diag_filter_len + 4 :
                                            sizeof(struct inet_diag_bc_op)
                                            * 4;
         diag_cur_ops[(*diag_cur_idx) + 1].code = INET_DIAG_BC_NOP;
@@ -101,7 +198,7 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
                                              (diag_cur_count - *diag_cur_num));
         diag_cur_ops[(*diag_cur_idx) + 2].no =
                                             *diag_cur_num == diag_cur_count ?
-                                            0xFFFF :
+                                            ctx->diag_filter_len + 4 :
                                             sizeof(struct inet_diag_bc_op)
                                             * 2;
         diag_cur_ops[*(diag_cur_idx) + 3].code = INET_DIAG_BC_NOP;
@@ -219,8 +316,27 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    if (!num_sport && !num_dport) {
+        fprintf(stderr, "No ports given\n");
+        return 1;
+    }
+
     fprintf(stdout, "# source ports: %u # destination ports: %u\n", num_sport,
             num_dport);
+
+    if((ctx->diag_dump_socket = socket(AF_NETLINK, SOCK_DGRAM,
+                                       NETLINK_INET_DIAG)) == -1) {
+        fprintf(stderr, "Creating dump socket failed with error %s (%u)\n",
+                strerror(errno), errno);
+        return 1;
+    }
+
+    if((ctx->diag_req_socket = socket(AF_NETLINK, SOCK_DGRAM,
+                                      NETLINK_INET_DIAG)) == -1) {
+        fprintf(stderr, "Creating request socket failed with error %s (%u)\n",
+                strerror(errno), errno);
+        return 1;
+    }
 
     //Since there is no equal operator, a port comparison will requires four
     //bc_op-structs. Two for LE (since ports is kept in a second struct) and two
@@ -239,5 +355,11 @@ int main(int argc, char *argv[])
         output_filter(ctx);
     }
 
-    return 0;
+    if (send_diag_msg(ctx) < 0) {
+        fprintf(stderr, "Sending diag message failed with %s (%u)\n",
+                strerror(errno), errno);
+        return 1;
+    }
+
+    return recv_diag_msg(ctx);
 }
