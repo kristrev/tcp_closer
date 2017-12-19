@@ -14,8 +14,8 @@ static void output_filter(struct tcp_closer_ctx *ctx)
     uint16_t i;
 
     for (i = 0; i < num_ops; i++) {
-        fprintf(stdout, "diag_filter[%u]->code = %u\n", i,
-                ctx->diag_filter[i].code);
+        fprintf(stdout, "diag_filter[%u]->code = %s\n", i,
+                inet_diag_op_code_str[ctx->diag_filter[i].code]);
         fprintf(stdout, "diag_filter[%u]->yes = %u\n", i,
                 ctx->diag_filter[i].yes);
         fprintf(stdout, "diag_filter[%u]->no = %u\n", i,
@@ -27,11 +27,17 @@ static void output_filter(struct tcp_closer_ctx *ctx)
 static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
                           uint16_t num_sport, uint16_t num_dport)
 {
-    struct inet_diag_bc_op *diag_sports = ctx->diag_filter;
     //Destination ports are always stored after source ports in our buffer
+    struct inet_diag_bc_op *diag_sports = ctx->diag_filter;
     struct inet_diag_bc_op *diag_dports = ctx->diag_filter + (num_sport * 4);
     uint16_t diag_sports_idx = 0, diag_dports_idx = 0, diag_sports_num = 1,
              diag_dports_num = 1;
+
+    //Value used by the generic part of the function
+    struct inet_diag_bc_op *diag_cur_ops;
+    uint16_t *diag_cur_idx, *diag_cur_num, diag_cur_count;
+    uint8_t code_ge, code_le;
+
     int opt;
     struct option long_options[] = {
         {"sport",   required_argument, NULL,   's'},
@@ -44,84 +50,61 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
     optind = 0;
 
     while ((opt = getopt_long(argc, argv, "s:d:", long_options, NULL)) != -1) {
-        //parse_cmdargs() is used to verify that input is valid. Here, we only
-        //care about the ports and do not need to handle, for example, unknown
-        //arguments
-        //TODO: Generalize handling of sport/dport once this is working
-        if (opt == 's') {
-            //Create the greater than operation. The only interesting thing
-            //going on is the value of no. If this is the last sport and
-            //we don't match, we should abort loop. Thus, we set it to 0xFFFF to
-            //ensure that len will be negative
-            diag_sports[diag_sports_idx].code = INET_DIAG_BC_S_GE;
-            diag_sports[diag_sports_idx].yes = sizeof(struct inet_diag_bc_op)
-                                                * 2;
-            diag_sports[diag_sports_idx].no = diag_sports_num == num_sport ?
-                                               0xFFFF :
-                                               sizeof(struct inet_diag_bc_op)
-                                               * 4;
-            diag_sports[diag_sports_idx + 1].code = INET_DIAG_BC_NOP;
-            diag_sports[diag_sports_idx + 1].no = atoi(optarg);
-
-            //Same as above. Here, yes is interesting. We can jump straight to
-            //dports. This means offset is sizeof() * 2 to pass this block.
-            //Then, we add sizeof() * 4 * (num_sport - diag_sports_num) to pass
-            //rest of sport comparisons
-            diag_sports[diag_sports_idx + 2].code = INET_DIAG_BC_S_LE;
-            diag_sports[diag_sports_idx + 2].yes = 
-                                                (sizeof(struct inet_diag_bc_op)
-                                                 * 2) +
-                                                (sizeof(struct inet_diag_bc_op)
-                                                 * 4 *
-                                                 (num_sport - diag_sports_num));
-            diag_sports[diag_sports_idx + 2].no =
-                                               diag_sports_num == num_sport ?
-                                               0xFFFF :
-                                               sizeof(struct inet_diag_bc_op)
-                                               * 2;
-            diag_sports[diag_sports_idx + 3].code = INET_DIAG_BC_NOP;
-            diag_sports[diag_sports_idx + 3].no = atoi(optarg);
-           
-            diag_sports_idx += 4;
-            diag_sports_num += 1;
-        } else if (opt == 'd') {
-            diag_dports[diag_dports_idx].code = INET_DIAG_BC_D_GE;
-            diag_dports[diag_dports_idx].yes = sizeof(struct inet_diag_bc_op)
-                                                * 2;
-            diag_dports[diag_dports_idx].no = diag_dports_num == num_dport ?
-                                               0xFFFF :
-                                               sizeof(struct inet_diag_bc_op)
-                                               * 4;
-            diag_dports[diag_dports_idx + 1].code = INET_DIAG_BC_NOP;
-            diag_dports[diag_dports_idx + 1].no = atoi(optarg);
-
-            //Same as above
-            diag_dports[diag_dports_idx + 2].code = INET_DIAG_BC_D_LE;
-            diag_dports[diag_dports_idx + 2].yes = 
-                                                (sizeof(struct inet_diag_bc_op)
-                                                 * 2) +
-                                                (sizeof(struct inet_diag_bc_op)
-                                                 * 4 *
-                                                 (num_dport - diag_dports_num));
-            diag_dports[diag_dports_idx + 2].no =
-                                               diag_dports_num == num_dport ?
-                                               0xFFFF :
-                                               sizeof(struct inet_diag_bc_op)
-                                               * 2;
-            diag_dports[diag_dports_idx + 3].code = INET_DIAG_BC_NOP;
-            diag_dports[diag_dports_idx + 3].no = atoi(optarg);
-           
-            diag_dports_idx += 4;
-            diag_dports_num += 1;
+        if (opt != 's' && opt != 'd') {
+            continue;
         }
+
+        if (opt == 's') {
+            code_ge = INET_DIAG_BC_S_GE;
+            code_le = INET_DIAG_BC_S_LE;
+            diag_cur_ops = diag_sports;
+            diag_cur_idx = &diag_sports_idx;
+            diag_cur_num = &diag_sports_num;
+            diag_cur_count = num_sport;
+        } else {
+            code_ge = INET_DIAG_BC_D_GE;
+            code_le = INET_DIAG_BC_D_LE;
+            diag_cur_ops = diag_dports;
+            diag_cur_idx = &diag_dports_idx;
+            diag_cur_num = &diag_dports_num;
+            diag_cur_count = num_dport;
+        }
+
+        //Create the greater than operation. The only interesting thing
+        //going on is the value of no. If this is the last sport and
+        //we don't match, we should abort loop. Thus, we set it to 0xFFFF to
+        //ensure that len will be negative
+        diag_cur_ops[*diag_cur_idx].code = code_ge;
+        diag_cur_ops[*diag_cur_idx].yes = sizeof(struct inet_diag_bc_op) * 2;
+        diag_cur_ops[*diag_cur_idx].no = *diag_cur_num == diag_cur_count ?
+                                           0xFFFF :
+                                           sizeof(struct inet_diag_bc_op)
+                                           * 4;
+        diag_cur_ops[(*diag_cur_idx) + 1].code = INET_DIAG_BC_NOP;
+        diag_cur_ops[(*diag_cur_idx) + 1].no = atoi(optarg);
+
+        //Same as above. Here, yes is interesting. We can jump straight to
+        //dports. This means offset is sizeof() * 2 to pass this block.
+        //Then, we add sizeof() * 4 * (num_sport - diag_sports_num) to pass
+        //rest of sport comparisons
+        diag_cur_ops[(*diag_cur_idx) + 2].code = code_le;
+        diag_cur_ops[(*diag_cur_idx) + 2].yes =
+                                            (sizeof(struct inet_diag_bc_op)
+                                             * 2) +
+                                            (sizeof(struct inet_diag_bc_op)
+                                             * 4 *
+                                             (diag_cur_count - *diag_cur_num));
+        diag_cur_ops[(*diag_cur_idx) + 2].no =
+                                            *diag_cur_num == diag_cur_count ?
+                                            0xFFFF :
+                                            sizeof(struct inet_diag_bc_op)
+                                            * 2;
+        diag_cur_ops[*(diag_cur_idx) + 3].code = INET_DIAG_BC_NOP;
+        diag_cur_ops[*(diag_cur_idx) + 3].no = atoi(optarg);
+
+        (*diag_cur_idx) += 4;
+        (*diag_cur_num) += 1;
     }
-
-    //fprintf(stdout, "diag_sports %p diag_dports %p\n", diag_sports, diag_dports);
-
-    //Iterate over arguments
-    //
-    //Create bc_op according to algorith, on paper
-    //
 }
 
 //Counts config ports and returns false if any unknown options is found
