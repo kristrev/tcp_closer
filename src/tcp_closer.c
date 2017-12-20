@@ -51,7 +51,7 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     rta.rta_len = RTA_LENGTH(ctx->diag_filter_len);
     nlh.nlmsg_len += rta.rta_len;
 
-    printf("Data len is %u\n", rta.rta_len - sizeof(rta));
+    printf("Filter length %u\n", rta.rta_len - sizeof(rta));
 
     iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
     iov[1] = (struct iovec) {&conn_req, sizeof(conn_req)};
@@ -129,18 +129,18 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
 {
     //Destination ports are always stored after source ports in our buffer
     struct inet_diag_bc_op *diag_sports = ctx->diag_filter;
-    struct inet_diag_bc_op *diag_dports = ctx->diag_filter + (num_sport * 4);
+    struct inet_diag_bc_op *diag_dports = ctx->diag_filter +
+                                          (num_sport ? ((num_sport - 1) * 5) + 4 : 0);
+
     uint16_t diag_sports_idx = 0, diag_dports_idx = 0, diag_sports_num = 1,
              diag_dports_num = 1;
 
     //Value used by the generic part of the function
     struct inet_diag_bc_op *diag_cur_ops;
-    uint16_t *diag_cur_idx, *diag_cur_num, diag_cur_count;
+    uint16_t *diag_cur_idx, *diag_cur_num, diag_cur_count, left_of_filter;
     uint8_t code_ge, code_le;
 
-    //The filter is never allowed to return something lager than cur_len + 4, so
-    //we need to keep how much is left of the filter around
-    int opt, filter_left = ctx->diag_filter_len;
+    int opt;
     struct option long_options[] = {
         {"sport",   required_argument, NULL,   's'},
         {"dport",   required_argument, NULL,   'd'},
@@ -183,39 +183,72 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
         diag_cur_ops[*diag_cur_idx].code = code_ge;
         diag_cur_ops[*diag_cur_idx].yes = sizeof(struct inet_diag_bc_op) * 2;
         diag_cur_ops[*diag_cur_idx].no = *diag_cur_num == diag_cur_count ?
-                                           filter_left + 4 :
-                                           sizeof(struct inet_diag_bc_op)
-                                           * 4;
+                                         0 :
+                                         sizeof(struct inet_diag_bc_op) * 5;
         diag_cur_ops[(*diag_cur_idx) + 1].code = INET_DIAG_BC_NOP;
         diag_cur_ops[(*diag_cur_idx) + 1].yes = sizeof(struct inet_diag_bc_op);
         diag_cur_ops[(*diag_cur_idx) + 1].no = atoi(optarg);
-
-        filter_left -= (sizeof(struct inet_diag_bc_op) * 2);
 
         //Same as above. Here, yes is interesting. We can jump straight to
         //dports. This means offset is sizeof() * 2 to pass this block.
         //Then, we add sizeof() * 4 * (num_sport - diag_sports_num) to pass
         //rest of sport comparisons
         diag_cur_ops[(*diag_cur_idx) + 2].code = code_le;
-        diag_cur_ops[(*diag_cur_idx) + 2].yes =
-                                            (sizeof(struct inet_diag_bc_op)
-                                             * 2) +
-                                            (sizeof(struct inet_diag_bc_op)
-                                             * 4 *
-                                             (diag_cur_count - *diag_cur_num));
-        diag_cur_ops[(*diag_cur_idx) + 2].no =
-                                            *diag_cur_num == diag_cur_count ?
-                                            filter_left + 4 :
-                                            sizeof(struct inet_diag_bc_op)
-                                            * 2;
-        diag_cur_ops[*(diag_cur_idx) + 3].code = INET_DIAG_BC_NOP;
+        diag_cur_ops[(*diag_cur_idx) + 2].yes = sizeof(struct inet_diag_bc_op) * 2;
+        diag_cur_ops[(*diag_cur_idx) + 2].no = *diag_cur_num == diag_cur_count ?
+                                               0 :
+                                               sizeof(struct inet_diag_bc_op) * 3;
+        diag_cur_ops[(*diag_cur_idx) + 3].code = INET_DIAG_BC_NOP;
         diag_cur_ops[(*diag_cur_idx) + 3].yes = sizeof(struct inet_diag_bc_op);
-        diag_cur_ops[*(diag_cur_idx) + 3].no = atoi(optarg);
+        diag_cur_ops[(*diag_cur_idx) + 3].no = atoi(optarg);
 
-        (*diag_cur_idx) += 4;
+        if (*diag_cur_num != diag_cur_count) {
+            diag_cur_ops[(*diag_cur_idx) + 4].code = INET_DIAG_BC_JMP;
+            diag_cur_ops[(*diag_cur_idx) + 4].yes = sizeof(struct inet_diag_bc_op);
+
+            //Logic behind this calculation is as follows. If we hit a JMP, we
+            //want to skip all the remaining operations of this type. All
+            //comparisons block, except the last one, contains a JMP op. The
+            //last block does not need a JMP op, since we will either fail and
+            //jump to the end (no can have any offset) or continue with
+            //comparisons/finish if we match.
+            //
+            //The offset for any jump block is sizeof() * (num_left - 1) * 5 +
+            //sizeof() * 4 + sizeof(). First part all all normal blocks, second
+            //is the size of the last block and third is this struct
+            diag_cur_ops[(*diag_cur_idx) + 4].no = sizeof(struct inet_diag_bc_op) +
+                                                   ((diag_cur_count - *diag_cur_num - 1) * sizeof(struct inet_diag_bc_op) * 5) +
+                                                   sizeof(struct inet_diag_bc_op) * 4;
+            (*diag_cur_idx) += 5;
+        } else {
+            (*diag_cur_idx) += 4;
+        }
+
         (*diag_cur_num) += 1;
+    }
 
-        filter_left -= (sizeof(struct inet_diag_bc_op) * 2);
+    if (num_sport) {
+        diag_sports_idx -= 4;
+        if (num_dport) {
+            left_of_filter = ((num_dport - 1) * sizeof(struct inet_diag_bc_op) * 5) +
+                             sizeof(struct inet_diag_bc_op) * 4;
+        } else {
+            left_of_filter = 0;
+        }
+
+        diag_sports[diag_sports_idx].no = left_of_filter +
+                                          sizeof(struct inet_diag_bc_op) * 4
+                                          + 4;
+        diag_sports[diag_sports_idx + 2].no = left_of_filter +
+                                              sizeof(struct inet_diag_bc_op) * 2
+                                              + 4;
+    }
+
+    if (num_dport) {
+        diag_dports_idx -= 4;
+
+        diag_dports[diag_dports_idx].no = (sizeof(struct inet_diag_bc_op) * 4) + 4;
+        diag_dports[diag_dports_idx + 2].no = (sizeof(struct inet_diag_bc_op) * 2) + 4;
     }
 }
 
@@ -348,11 +381,20 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    //Since there is no equal operator, a port comparison will requires four
-    //bc_op-structs. Two for LE (since ports is kept in a second struct) and two
-    //for GE
-    ctx->diag_filter_len = sizeof(struct inet_diag_bc_op) * 4 *
-                           (num_sport + num_dport);
+    //Since there is no equal operator, a port comparison will requires five
+    //bc_op-structs. Two for LE (since ports is kept in a second struct), two
+    //for GE and one for JMP
+
+    if (num_sport) {
+        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_sport - 1) +
+                                sizeof(struct inet_diag_bc_op) * 4;
+    }
+
+    if (num_dport) {
+        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_dport - 1) +
+                                sizeof(struct inet_diag_bc_op) * 4;
+    }
+
     ctx->diag_filter = calloc(ctx->diag_filter_len, 1);
     if (!ctx->diag_filter) {
         fprintf(stderr, "Failed to allocate memory for filter\n");

@@ -3,31 +3,17 @@
 
 struct inet_diag_bc_op;
 
-//When the kernel processes a filter (inet_diag_bc_run() in
-//net/ipv4/inet_diag.c), the first step is to read the length of the filter
-//(sizeof(struct inet_diag_bc_op) * num_elements_in_filter). The kernel then
-//checks the bc_ops one by one, and the only way to abot the loop is to make
-//the length-variable used in the loop negative.
+//This is an artifical limitation introduced by me, but is large enough for at
+//least my use-cases. Since there is no EQ operator, we need to check a port for
+//both LE and GE. In case of a match, we also need to be able to jump directly
+//to destination ports/end. This means that one port requires five op-structs
+//and will consume 20 bytes.
 //
-//The value used when updating len is either yes or no in inet_diag_bc_op. yes
-//is uint8_t and will (in our case) always be the length of the command and its
-//arguments (we don't use arguments). No is a uint16_t and is the offset to jump
-//to if a comparison fails. In order to ensure that we can always abort the
-//loop, we must be able to jump past all pending inet_diag_bc_op-structs.
-//
-//The maximum offset that can be specified by one bc_op is 0xFFFF. To ensure
-//that we can always skip all pending bc_ops, the maximum length of the whole
-//filter is 0xFFFF - 1. One bc_op-struct is 4 bytes and, since there is no equal
-//code, we need to check both LE and GE for every port. Finally, each comparison
-//operation consists of two bc-op-structs, since the port is kept in a second
-//bc_op-struct. Thus, comparing one port consumes 16 bytes. The maximum number
-//of bc_ops in our filter is therefore (0xFFFF - 1) / 16 = 4095.
-//
-//The limit can be solved in smarter ways, since we only need to be able to
-//abort the loop from the last member in the destination/source port sets.
-//However, that is an improvement for another day. 4000 ports is enough for
-//now.
-#define MAX_NUM_PORTS 4095
+//The correct limit is something closer to 0xFFFF/20 source and destination
+//ports, with some adjustmenets for the first and last operation. The value used
+//to store the offset to jump to is a short, so maximum offset from any op is
+//0xFFFF
+#define MAX_NUM_PORTS 256
 
 //There are currently 11 states, but the first state is stored in pos. 1.
 //Therefore, I need a 12 bit bitmask
