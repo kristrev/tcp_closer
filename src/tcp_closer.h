@@ -89,6 +89,9 @@ struct tcp_closer_ctx {
     int32_t diag_dump_socket;
     int32_t diag_req_socket;
 
+    //Limit for tcpi_last_data_recv before killing socket
+    uint16_t idle_time;
+
     bool verbose_mode;
     bool use_netlink;
 };
