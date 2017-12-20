@@ -38,9 +38,8 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     //We only care about TCP
     conn_req.sdiag_protocol = IPPROTO_TCP;
 
-    //We want TCP connections in all states
-    //TODO: Check if we can reduce to ESTABLISHED
-    conn_req.idiag_states = TCPF_ALL;
+    //We are only interested in established connections
+    conn_req.idiag_states = 1 << TCP_ESTABLISHED;
 
     //Request extended TCP information (it is the tcp_info struct)
     conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
@@ -69,7 +68,41 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     return retval;
 }
 
-static void parse_diag_msg(struct inet_diag_msg *diag_msg, int rtalen){
+static void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
+{
+    struct msghdr msg = {0};
+    struct nlmsghdr nlh = {0};
+    struct inet_diag_req_v2 destroy_req = {0};
+    struct sockaddr_nl sa = {0};
+    struct iovec iov[2];
+
+    nlh.nlmsg_type = SOCK_DESTROY;
+    //Destroying a socket is best-effort only, so no need for ACK
+    nlh.nlmsg_flags = NLM_F_REQUEST;
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(destroy_req));
+
+    //TODO: Add 4/6 flag to command line
+    destroy_req.sdiag_family = diag_msg->idiag_family;
+    destroy_req.sdiag_protocol = IPPROTO_TCP;
+
+    //Copy ID from kernel message
+    destroy_req.id = diag_msg->id;
+
+    sa.nl_family = AF_NETLINK;
+
+    iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
+    iov[1] = (struct iovec) {&destroy_req, sizeof(destroy_req)};
+
+    msg.msg_name = (void*) &sa;
+    msg.msg_namelen = sizeof(sa);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 2;
+
+    sendmsg(ctx->diag_req_socket, &msg, 0);
+}
+
+static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg, int rtalen)
+{
     struct rtattr *attr;
     struct tcp_info *tcpi;
     char local_addr_buf[INET6_ADDRSTRLEN];
@@ -108,30 +141,34 @@ static void parse_diag_msg(struct inet_diag_msg *diag_msg, int rtalen){
                 remote_addr_buf, ntohs(diag_msg->id.idiag_dport));
     }
 
-    //Parse the attributes of the netlink message in search of the
-    //INET_DIAG_INFO-attribute
-    if(rtalen > 0){
-        attr = (struct rtattr*) (diag_msg+1);
+    attr = (struct rtattr*) (diag_msg+1);
 
-        while(RTA_OK(attr, rtalen)){
-            if(attr->rta_type == INET_DIAG_INFO){
-                //The payload of this attribute is a tcp_info-struct, so it is
-                //ok to cast
-                tcpi = (struct tcp_info*) RTA_DATA(attr);
-
-                //Output some sample data
-                fprintf(stdout, "\tState: %s RTT: %gms (var. %gms) "
-                        "Recv. RTT: %gms Snd_cwnd: %u/%u\n",
-                        tcp_states_map[tcpi->tcpi_state],
-                        (double) tcpi->tcpi_rtt/1000, 
-                        (double) tcpi->tcpi_rttvar/1000,
-                        (double) tcpi->tcpi_rcv_rtt/1000, 
-                        tcpi->tcpi_unacked,
-                        tcpi->tcpi_snd_cwnd);
-            }
+    while(RTA_OK(attr, rtalen)){
+        if (attr->rta_type != INET_DIAG_INFO) {
             attr = RTA_NEXT(attr, rtalen); 
+            continue;
         }
+
+        //The payload of this attribute is a tcp_info-struct, so it is
+        //ok to cast
+        tcpi = (struct tcp_info*) RTA_DATA(attr);
+
+        //Output some sample data
+        fprintf(stdout, "\tState: %s RTT: %gms (var. %gms) "
+                "Recv. RTT: %gms Snd_cwnd: %u/%u "
+                "Last_data_recv: %.2fsec ago Last_ack_recv %.2fsec ago\n",
+                tcp_states_map[tcpi->tcpi_state],
+                (double) tcpi->tcpi_rtt/1000,
+                (double) tcpi->tcpi_rttvar/1000,
+                (double) tcpi->tcpi_rcv_rtt/1000,
+                tcpi->tcpi_unacked,
+                tcpi->tcpi_snd_cwnd,
+                (double) tcpi->tcpi_last_data_recv/1000,
+                (double) tcpi->tcpi_last_ack_recv/1000);
+        break;
     }
+
+    destroy_socket(ctx, diag_msg);
 }
 
 static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
@@ -148,7 +185,6 @@ static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
 
         while(NLMSG_OK(nlh, numbytes)){
             if(nlh->nlmsg_type == NLMSG_DONE) {
-                fprintf(stdout, "Done dumping socket information\n");
                 return 0;
             }
 
@@ -164,7 +200,7 @@ static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
 
             diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
             rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
-            parse_diag_msg(diag_msg, rtalen);
+            parse_diag_msg(ctx, diag_msg, rtalen);
 
             nlh = NLMSG_NEXT(nlh, numbytes);
         }
