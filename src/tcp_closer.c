@@ -11,8 +11,11 @@
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <arpa/inet.h>
 #include <linux/in.h>
 #include <linux/sock_diag.h>
+#include <pwd.h>
+#include <linux/tcp.h>
 
 #include "tcp_closer.h"
 
@@ -51,8 +54,6 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     rta.rta_len = RTA_LENGTH(ctx->diag_filter_len);
     nlh.nlmsg_len += rta.rta_len;
 
-    printf("Filter length %u\n", rta.rta_len - sizeof(rta));
-
     iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
     iov[1] = (struct iovec) {&conn_req, sizeof(conn_req)};
     iov[2] = (struct iovec) {&rta, sizeof(rta)};
@@ -68,13 +69,78 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
     return retval;
 }
 
+static void parse_diag_msg(struct inet_diag_msg *diag_msg, int rtalen){
+    struct rtattr *attr;
+    struct tcp_info *tcpi;
+    char local_addr_buf[INET6_ADDRSTRLEN];
+    char remote_addr_buf[INET6_ADDRSTRLEN];
+    struct passwd *uid_info = NULL;
+
+    memset(local_addr_buf, 0, sizeof(local_addr_buf));
+    memset(remote_addr_buf, 0, sizeof(remote_addr_buf));
+
+    //(Try to) Get user info
+    uid_info = getpwuid(diag_msg->idiag_uid);
+
+    if(diag_msg->idiag_family == AF_INET){
+        inet_ntop(AF_INET, (struct in_addr*) &(diag_msg->id.idiag_src), 
+            local_addr_buf, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, (struct in_addr*) &(diag_msg->id.idiag_dst), 
+            remote_addr_buf, INET_ADDRSTRLEN);
+    } else if(diag_msg->idiag_family == AF_INET6){
+        inet_ntop(AF_INET6, (struct in_addr6*) &(diag_msg->id.idiag_src),
+                local_addr_buf, INET6_ADDRSTRLEN);
+        inet_ntop(AF_INET6, (struct in_addr6*) &(diag_msg->id.idiag_dst),
+                remote_addr_buf, INET6_ADDRSTRLEN);
+    } else {
+        fprintf(stderr, "Unknown family\n");
+        return;
+    }
+
+    if(local_addr_buf[0] == 0 || remote_addr_buf[0] == 0){
+        fprintf(stderr, "Could not get required connection information\n");
+        return;
+    } else {
+        fprintf(stdout, "User: %s (UID: %u) Src: %s:%d Dst: %s:%d\n", 
+                uid_info == NULL ? "Not found" : uid_info->pw_name,
+                diag_msg->idiag_uid,
+                local_addr_buf, ntohs(diag_msg->id.idiag_sport), 
+                remote_addr_buf, ntohs(diag_msg->id.idiag_dport));
+    }
+
+    //Parse the attributes of the netlink message in search of the
+    //INET_DIAG_INFO-attribute
+    if(rtalen > 0){
+        attr = (struct rtattr*) (diag_msg+1);
+
+        while(RTA_OK(attr, rtalen)){
+            if(attr->rta_type == INET_DIAG_INFO){
+                //The payload of this attribute is a tcp_info-struct, so it is
+                //ok to cast
+                tcpi = (struct tcp_info*) RTA_DATA(attr);
+
+                //Output some sample data
+                fprintf(stdout, "\tState: %s RTT: %gms (var. %gms) "
+                        "Recv. RTT: %gms Snd_cwnd: %u/%u\n",
+                        tcp_states_map[tcpi->tcpi_state],
+                        (double) tcpi->tcpi_rtt/1000, 
+                        (double) tcpi->tcpi_rttvar/1000,
+                        (double) tcpi->tcpi_rcv_rtt/1000, 
+                        tcpi->tcpi_unacked,
+                        tcpi->tcpi_snd_cwnd);
+            }
+            attr = RTA_NEXT(attr, rtalen); 
+        }
+    }
+}
+
 static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
 {
     struct nlmsghdr *nlh;
     struct nlmsgerr *err;
     uint8_t recv_buf[SOCKET_BUFFER_SIZE];
     struct inet_diag_msg *diag_msg;
-    int32_t numbytes;
+    int32_t numbytes, rtalen;
 
     while(1){
         numbytes = recv(ctx->diag_dump_socket, recv_buf, sizeof(recv_buf), 0);
@@ -96,11 +162,9 @@ static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
                 }
             }
 
-            fprintf(stdout, "Got a diag msg\n");
-            /*
             diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
             rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
-            parse_diag_msg(diag_msg, rtalen);*/
+            parse_diag_msg(diag_msg, rtalen);
 
             nlh = NLMSG_NEXT(nlh, numbytes);
         }
