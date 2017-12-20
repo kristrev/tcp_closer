@@ -90,6 +90,7 @@ struct tcp_closer_ctx {
     int32_t diag_req_socket;
 
     bool verbose_mode;
+    bool use_netlink;
 };
 
 #endif

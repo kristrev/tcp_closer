@@ -32,6 +32,8 @@
 #include <linux/sock_diag.h>
 #include <pwd.h>
 #include <linux/tcp.h>
+#include <dirent.h>
+#include <signal.h>
 
 #include "tcp_closer.h"
 
@@ -117,6 +119,85 @@ static void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *dia
     sendmsg(ctx->diag_req_socket, &msg, 0);
 }
 
+static void destroy_socket_proc(uint32_t inode_org)
+{
+    //Length of /proc/strlen(uint64_max)/fd/d_name (d_name is 256, inc. \0)
+    char dir_buf[286];
+    char link_buf[255] = {0};
+    char *inode_str;
+    struct dirent *lDirEnt;
+    DIR *lProcDir, *lProcFdDir;
+    uint64_t pid;
+    uint32_t inode;
+
+    lProcDir = opendir("/proc");
+
+    if (!lProcDir) {
+        fprintf(stderr, "Failed to open /proc\n");
+        return;
+    }
+
+    while ((lDirEnt = readdir(lProcDir))) {
+        pid = (uint64_t) atoll(lDirEnt->d_name);
+
+        if (!pid) {
+            continue;
+        }
+
+        snprintf(dir_buf, sizeof(dir_buf), "/proc/%lu/fd", pid);
+
+        lProcFdDir = opendir(dir_buf);
+
+        if (!lProcFdDir) {
+            fprintf(stderr, "Failed to open: %s. Error: %s (%d)\n", dir_buf,
+                    strerror(errno), errno);
+            continue;
+        }
+
+        while ((lDirEnt = readdir(lProcFdDir))) {
+            if (lDirEnt->d_type != DT_LNK) {
+                continue;
+            }
+
+            snprintf(dir_buf, sizeof(dir_buf), "/proc/%lu/fd/%s", pid,
+                    lDirEnt->d_name);
+
+            memset(link_buf, 0, sizeof(link_buf));
+            if (readlink(dir_buf, link_buf, sizeof(link_buf)) <= 0) {
+                fprintf(stderr, "Failed to read link %s. Error: %s (%d)\n",
+                        dir_buf, strerror(errno), errno);
+                continue;
+            }
+
+            //All sockets start with socket
+            if (strncmp(link_buf, "socket", strlen("socket"))) {
+                continue;
+            }
+
+            //we know that format is socket:[<inode>]
+            inode_str = strstr(link_buf, "[") + 1;
+            link_buf[strlen(link_buf) - 1] = '\0';
+
+            inode = atoi(inode_str);
+
+            if (inode != inode_org) {
+                continue;
+            }
+
+            fprintf(stdout, "Will kill PID %lu\n", pid);
+            kill(pid, SIGKILL);
+
+            //No need to check any other link in this folder, we have killed
+            //the process
+            break;
+        }
+
+        closedir(lProcFdDir);
+    }
+
+    closedir(lProcDir);
+}
+
 static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg, int rtalen)
 {
     struct rtattr *attr;
@@ -150,7 +231,7 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *dia
         fprintf(stderr, "Could not get required connection information\n");
         return;
     } else {
-        fprintf(stdout, "User: %s (UID: %u) Src: %s:%d Dst: %s:%d\n", 
+        fprintf(stdout, "Will destory User: %s (UID: %u) Src: %s:%d Dst: %s:%d\n", 
                 uid_info == NULL ? "Not found" : uid_info->pw_name,
                 diag_msg->idiag_uid,
                 local_addr_buf, ntohs(diag_msg->id.idiag_sport), 
@@ -184,7 +265,11 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *dia
         break;
     }
 
-    destroy_socket(ctx, diag_msg);
+    if (ctx->use_netlink) {
+        destroy_socket(ctx, diag_msg);
+    } else {
+        destroy_socket_proc(diag_msg->idiag_inode);
+    }
 }
 
 static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
@@ -380,7 +465,7 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         {"dport",       required_argument,  NULL,   'd'},
         {"verbose",     no_argument,        NULL,   'v'},
         {"help",        required_argument,  NULL,   'h'},
-        {"kill_only",   no_argument,        NULL,    0 },   
+        {"use_proc",    no_argument,        NULL,    0 },
         {0,             0,                  0,       0 }
     };
 
@@ -388,7 +473,11 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
                                         &option_index)) != -1) {
         switch (opt) {
         case 0:
-            fprintf(stdout, "Got option %s\n", long_options[option_index].name);
+            //TODO: When we add more arguments with only a long option, we will
+            //split handling long options into a separate function
+            if (!strcmp("use_proc", long_options[option_index].name)) {
+                ctx->use_netlink = false;
+            }
             break;
         case 's':
             if (!atoi(optarg)) {
@@ -441,6 +530,7 @@ static void show_help()
     fprintf(stdout, "\t-d/--dport : destionation port to match\n");
     fprintf(stdout, "\t-v/--verbose : More verbose output\n");
     fprintf(stdout, "\t-h/--help : This output\n");
+    fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using SOCK_DESTROY\n");
     fprintf(stdout, "\n");
     fprintf(stdout, "At least one source or destination port must be given.\n"
                     "We will kill connections where the source port is one of\n"
@@ -466,6 +556,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to allocate memory for context-object\n");
         return 1;
     }
+
+    ctx->use_netlink = true;
 
     //Parse options and count number of source ports/destination ports. We need
     //to know the count before we create the filter, so that we can compute the
