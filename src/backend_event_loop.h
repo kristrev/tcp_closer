@@ -19,6 +19,7 @@
 
 #include <sys/queue.h>
 #include <sys/epoll.h>
+#include <stdbool.h>
 
 #define MAX_EPOLL_EVENTS 10
 
@@ -47,10 +48,12 @@ struct backend_timeout_handle{
 };
 
 struct backend_event_loop{
-    int32_t efd;
-    LIST_HEAD(timeout, backend_timeout_handle) timeout_list;
-    backend_itr_cb itr_cb;
     void *itr_data;
+    backend_itr_cb itr_cb;
+    LIST_HEAD(timeout, backend_timeout_handle) timeout_list;
+    int32_t efd;
+
+    bool stop;
 };
 
 //Create an backend_event_loop struct
@@ -87,4 +90,5 @@ struct backend_epoll_handle* backend_create_epoll_handle(void *ptr, int fd,
 //Function is for now never supposed to return. If it returns, something has
 //failed. Thus, I dont need a return value (yet)
 void backend_event_loop_run(struct backend_event_loop *del);
+void backend_event_loop_stop(struct backend_event_loop *del);
 #endif

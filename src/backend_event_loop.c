@@ -160,7 +160,7 @@ void backend_event_loop_run(struct backend_event_loop *del)
     uint64_t cur_time;
     struct backend_timeout_handle *timeout;
 
-    while(1){
+    while(!del->stop){
         timeout = del->timeout_list.lh_first;
         gettimeofday(&tv, NULL);
         cur_time = (tv.tv_sec * 1e3) + (tv.tv_usec / 1e3);
@@ -198,4 +198,10 @@ void backend_event_loop_run(struct backend_event_loop *del)
         if (del->itr_cb != NULL)
             del->itr_cb(del->itr_data);
     }
+}
+
+void backend_event_loop_stop(struct backend_event_loop *del)
+{
+    //For now, we let the loop iteration finish
+    del->stop = true;
 }
