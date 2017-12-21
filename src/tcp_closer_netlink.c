@@ -198,13 +198,15 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
             }
 
             if(nlh->nlmsg_type == NLMSG_ERROR){
-                err = NLMSG_DATA(nlh);
+                err = mnl_nlmsg_get_payload(nlh);
 
                 if (err->error) {
                     fprintf(stderr, "Error in netlink message: %s (%u)\n",
                             strerror(-err->error), -err->error);
                     break;
                 }
+
+                continue;
             }
 
             //TODO: Switch these to mnl too
