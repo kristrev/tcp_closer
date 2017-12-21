@@ -35,55 +35,33 @@
 #include <dirent.h>
 #include <signal.h>
 
+#include <libmnl/libmnl.h>
+
 #include "tcp_closer.h"
 
 static int send_diag_msg(struct tcp_closer_ctx *ctx)
 {
-    struct msghdr msg = {0};
-    struct nlmsghdr nlh = {0};
-    struct inet_diag_req_v2 conn_req = {0};
-    struct sockaddr_nl sa = {0};
-    struct iovec iov[4];
-    int retval = 0;
-    struct rtattr rta = {0};
+    uint8_t diag_buf[MNL_SOCKET_BUFFER_SIZE];
+    struct nlmsghdr *nlh;
+    struct inet_diag_req_v2 *diag_req;
 
-    //No need to specify groups or pid. This message only has one receiver and
-    //pid 0 is kernel
-    sa.nl_family = AF_NETLINK;
+    nlh = mnl_nlmsg_put_header(diag_buf);
+    nlh->nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST;
+    nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
 
-    //TODO: Provide this as a flag to the application, 4, 6 or both
-    conn_req.sdiag_family = AF_INET;
-    //We only care about TCP
-    conn_req.sdiag_protocol = IPPROTO_TCP;
+    diag_req = mnl_nlmsg_put_extra_header(nlh, sizeof(struct inet_diag_req_v2));
+    //TODO: Add a -4/-6 command line option
+    diag_req->sdiag_family = AF_INET;
+    diag_req->sdiag_protocol = IPPROTO_TCP;
 
-    //We are only interested in established connections
-    conn_req.idiag_states = 1 << TCP_ESTABLISHED;
+    //We are only interested in established connections and need the tcp-info
+    //struct
+    diag_req->idiag_ext |= (1 << (INET_DIAG_INFO - 1));
+    diag_req->idiag_states = 1 << TCP_ESTABLISHED;
 
-    //Request extended TCP information (it is the tcp_info struct)
-    conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
+    mnl_attr_put(nlh, INET_DIAG_REQ_BYTECODE, ctx->diag_filter_len, ctx->diag_filter);
 
-    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(conn_req));
-    nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST | NLM_F_ACK;
-    nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
-
-    memset(&rta, 0, sizeof(rta));
-    rta.rta_type = INET_DIAG_REQ_BYTECODE;
-    rta.rta_len = RTA_LENGTH(ctx->diag_filter_len);
-    nlh.nlmsg_len += rta.rta_len;
-
-    iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
-    iov[1] = (struct iovec) {&conn_req, sizeof(conn_req)};
-    iov[2] = (struct iovec) {&rta, sizeof(rta)};
-    iov[3] = (struct iovec) {ctx->diag_filter, ctx->diag_filter_len};
-
-    msg.msg_name = (void*) &sa;
-    msg.msg_namelen = sizeof(sa);
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 4;
-
-    retval = sendmsg(ctx->diag_dump_socket, &msg, 0);
-
-    return retval;
+    return mnl_socket_sendto(ctx->diag_dump_socket, diag_buf, nlh->nlmsg_len);
 }
 
 static void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
@@ -280,12 +258,12 @@ static int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
 {
     struct nlmsghdr *nlh;
     struct nlmsgerr *err;
-    uint8_t recv_buf[SOCKET_BUFFER_SIZE];
+    uint8_t recv_buf[MNL_SOCKET_BUFFER_SIZE];
     struct inet_diag_msg *diag_msg;
     int32_t numbytes, rtalen;
 
     while(1){
-        numbytes = recv(ctx->diag_dump_socket, recv_buf, sizeof(recv_buf), 0);
+        numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf, sizeof(recv_buf));
         nlh = (struct nlmsghdr*) recv_buf;
 
         while(NLMSG_OK(nlh, numbytes)){
@@ -576,6 +554,11 @@ int main(int argc, char *argv[])
 
     ctx->use_netlink = true;
 
+    if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
+        fprintf(stderr, "Failed to create inet_diag dump socket\n");
+        return 1;
+    }
+
     //Parse options and count number of source ports/destination ports. We need
     //to know the count before we create the filter, so that we can compute the
     //correct offset for the different operations, etc.
@@ -591,13 +574,6 @@ int main(int argc, char *argv[])
 
     fprintf(stdout, "# source ports: %u # destination ports: %u idle time: %ums\n", num_sport,
             num_dport, ctx->idle_time);
-
-    if((ctx->diag_dump_socket = socket(AF_NETLINK, SOCK_DGRAM,
-                                       NETLINK_INET_DIAG)) == -1) {
-        fprintf(stderr, "Creating dump socket failed with error %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
 
     if((ctx->diag_req_socket = socket(AF_NETLINK, SOCK_DGRAM,
                                       NETLINK_INET_DIAG)) == -1) {

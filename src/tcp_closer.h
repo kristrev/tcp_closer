@@ -18,6 +18,7 @@
 #define TCP_CLOSER_H
 
 struct inet_diag_bc_op;
+struct mnl_socket;
 
 //This is an artifical limitation introduced by me, but is large enough for at
 //least my use-cases. Since there is no EQ operator, we need to check a port for
@@ -29,7 +30,7 @@ struct inet_diag_bc_op;
 //ports, with some adjustmenets for the first and last operation. The value used
 //to store the offset to jump to is a short, so maximum offset from any op is
 //0xFFFF
-#define MAX_NUM_PORTS 256
+#define MAX_NUM_PORTS 128
 
 //There are currently 11 states, but the first state is stored in pos. 1.
 //Therefore, I need a 12 bit bitmask
@@ -84,9 +85,9 @@ static char *inet_diag_op_code_str[] = {
 
 struct tcp_closer_ctx {
     struct inet_diag_bc_op *diag_filter;
+    struct mnl_socket *diag_dump_socket;
 
     uint32_t diag_filter_len;
-    int32_t diag_dump_socket;
     int32_t diag_req_socket;
 
     //Limit for tcpi_last_data_recv before killing socket
