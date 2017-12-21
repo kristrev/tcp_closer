@@ -41,5 +41,6 @@ struct inet_diag_msg;
 
 int send_diag_msg(struct tcp_closer_ctx *ctx);
 void recv_diag_msg(void *data, int32_t fd, uint32_t events);
+void recv_destroy_msg(void *data, int32_t fd, uint32_t events);
 
 #endif

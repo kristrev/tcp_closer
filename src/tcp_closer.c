@@ -323,6 +323,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    mnl_socket_bind(ctx->diag_dump_socket, 0, MNL_SOCKET_AUTOPID);
+    mnl_socket_bind(ctx->diag_destroy_socket, 0, MNL_SOCKET_AUTOPID);
+
     if (!(ctx->dump_handle = backend_create_epoll_handle(ctx,
                                                          mnl_socket_get_fd(ctx->diag_dump_socket),
                                                          recv_diag_msg))) {
@@ -332,7 +335,7 @@ int main(int argc, char *argv[])
 
     if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
                                                             mnl_socket_get_fd(ctx->diag_destroy_socket),
-                                                            NULL))) {
+                                                            recv_destroy_msg))) {
         fprintf(stderr, "Failed to create diag dump epoll handle\n");
         return 1;
     }
@@ -382,6 +385,9 @@ int main(int argc, char *argv[])
                               mnl_socket_get_fd(ctx->diag_dump_socket),
                               ctx->dump_handle);
 
+    backend_event_loop_update(ctx->event_loop, EPOLLIN, EPOLL_CTL_ADD,
+                              mnl_socket_get_fd(ctx->diag_destroy_socket),
+                              ctx->destroy_handle);
 
     //First request is sent right away
     if (send_diag_msg(ctx) < 0) {

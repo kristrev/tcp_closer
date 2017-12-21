@@ -52,9 +52,12 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
     struct nlmsghdr *nlh;
     struct inet_diag_req_v2 *diag_req;
 
+    memset(diag_buf, 0, sizeof(diag_buf));
+
     nlh = mnl_nlmsg_put_header(diag_buf);
     nlh->nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST;
     nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    nlh->nlmsg_pid = mnl_socket_get_portid(ctx->diag_dump_socket);
 
     diag_req = mnl_nlmsg_put_extra_header(nlh, sizeof(struct inet_diag_req_v2));
     //TODO: Add a -4/-6 command line option
@@ -79,10 +82,12 @@ static void destroy_socket(struct tcp_closer_ctx *ctx,
     struct nlmsghdr *nlh;
     struct inet_diag_req_v2 *destroy_req;
 
+    memset(destroy_buf, 0, sizeof(destroy_buf));
+
     nlh = mnl_nlmsg_put_header(destroy_buf);
+    nlh->nlmsg_pid = mnl_socket_get_portid(ctx->diag_destroy_socket);
     nlh->nlmsg_type = SOCK_DESTROY;
-    //TODO: Add ACK so we can output some sensible error messages
-    nlh->nlmsg_flags = NLM_F_REQUEST;
+    nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
 
     destroy_req = mnl_nlmsg_put_extra_header(nlh,
                                              sizeof(struct inet_diag_req_v2));
@@ -186,35 +191,66 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
     struct inet_diag_msg *diag_msg;
     int32_t numbytes, payload_len;
 
-    //TODO: Improve error handling when socket fails/netlink triggers error
-    while(1){
-        numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf,
-                                       sizeof(recv_buf));
-        nlh = (struct nlmsghdr*) recv_buf;
+    numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf,
+                                   sizeof(recv_buf));
+    nlh = (struct nlmsghdr*) recv_buf;
 
-        while(mnl_nlmsg_ok(nlh, numbytes)){
-            if(nlh->nlmsg_type == NLMSG_DONE) {
+    while(mnl_nlmsg_ok(nlh, numbytes)){
+        if(nlh->nlmsg_type == NLMSG_DONE) {
+            break;
+        }
+
+        if(nlh->nlmsg_type == NLMSG_ERROR){
+            err = mnl_nlmsg_get_payload(nlh);
+
+            if (err->error) {
+                fprintf(stderr, "Error in netlink message: %s (%u)\n",
+                        strerror(-err->error), -err->error);
                 break;
             }
 
-            if(nlh->nlmsg_type == NLMSG_ERROR){
-                err = mnl_nlmsg_get_payload(nlh);
-
-                if (err->error) {
-                    fprintf(stderr, "Error in netlink message: %s (%u)\n",
-                            strerror(-err->error), -err->error);
-                    break;
-                }
-
-                continue;
-            }
-
-            //TODO: Switch these to mnl too
-            diag_msg = mnl_nlmsg_get_payload(nlh);
-            payload_len = mnl_nlmsg_get_payload_len(nlh);
-            parse_diag_msg(ctx, diag_msg, payload_len);
-            
-            nlh = mnl_nlmsg_next(nlh, &numbytes);
+            continue;
         }
+
+        //TODO: Switch these to mnl too
+        diag_msg = mnl_nlmsg_get_payload(nlh);
+        payload_len = mnl_nlmsg_get_payload_len(nlh);
+        parse_diag_msg(ctx, diag_msg, payload_len);
+
+        nlh = mnl_nlmsg_next(nlh, &numbytes);
+    }
+}
+
+void recv_destroy_msg(void *data, int32_t fd, uint32_t events)
+{
+    struct tcp_closer_ctx *ctx = data;
+    struct nlmsghdr *nlh;
+    struct nlmsgerr *err;
+    uint8_t recv_buf[MNL_SOCKET_BUFFER_SIZE];
+    int32_t numbytes;
+
+    numbytes = mnl_socket_recvfrom(ctx->diag_destroy_socket, recv_buf,
+                                   sizeof(recv_buf));
+    nlh = (struct nlmsghdr*) recv_buf;
+
+    while(mnl_nlmsg_ok(nlh, numbytes)){
+        if(nlh->nlmsg_type == NLMSG_DONE) {
+            break;
+        } else if (nlh->nlmsg_type != NLMSG_ERROR) {
+            fprintf(stdout, "Received unexpected type %u on destroy socket\n",
+                    nlh->nlmsg_type);
+            nlh = mnl_nlmsg_next(nlh, &numbytes);
+            continue;
+        }
+
+        err = mnl_nlmsg_get_payload(nlh);
+
+        if (err->error) {
+            fprintf(stderr, "Destroying socket failed. Reason: %s (%u)\n",
+                    strerror(-err->error), -err->error);
+            break;
+        }
+
+        nlh = mnl_nlmsg_next(nlh, &numbytes);
     }
 }
