@@ -43,6 +43,24 @@ static char *inet_diag_op_code_str[] = {
 	"INET_DIAG_BC_MARK_COND"
 };
 
+static void dump_timeout_cb(void *ptr)
+{
+    struct tcp_closer_ctx *ctx = ptr;
+
+    //Check if dump is in progress
+
+    if (send_diag_msg(ctx) < 0) {
+        fprintf(stderr, "Sending diag message failed with %s (%u)\n",
+                strerror(errno), errno);
+    }
+
+#if 0
+    if (ctx->dump_interval) {
+        ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
+    }
+#endif
+}
+
 static void output_filter(struct tcp_closer_ctx *ctx)
 {
     uint16_t num_ops = ctx->diag_filter_len / sizeof(struct inet_diag_bc_op);
@@ -198,13 +216,14 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         {"sport",       required_argument,  NULL,   's'},
         {"dport",       required_argument,  NULL,   'd'},
         {"idle_time",   required_argument,  NULL,   't'},
+        {"interval",    required_argument,  NULL,   'i'},
         {"verbose",     no_argument,        NULL,   'v'},
         {"help",        required_argument,  NULL,   'h'},
         {"use_proc",    no_argument,        NULL,    0 },
         {0,             0,                  0,       0 }
     };
 
-    while (!error && (opt = getopt_long(argc, argv, "s:d:t:vh", long_options,
+    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:vh", long_options,
                                         &option_index)) != -1) {
         switch (opt) {
         case 0:
@@ -241,6 +260,14 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
                 ctx->idle_time = atoi(optarg);
             }
             break;
+        case 'i':
+            if (!atoi(optarg)) {
+                fprintf(stderr, "Found invalid dump interval (value %s)\n",
+                        optarg);
+            } else {
+                ctx->dump_interval = atoi(optarg);
+            }
+            break;
         case 'v':
             ctx->verbose_mode = true;
             break;
@@ -272,12 +299,16 @@ static void show_help()
     fprintf(stdout, "Following arguments are supported:\n");
     fprintf(stdout, "\t-s/--sport : source port to match\n");
     fprintf(stdout, "\t-d/--dport : destionation port to match\n");
-    fprintf(stdout, "\t-t/--idle_time : limit for time since connection last received data (in ms)."
-            " Defaults to 0, which means that all connections matching sport/dport will be "
-            "destroyed\n");
+    fprintf(stdout, "\t-t/--idle_time : limit for time since connection last "
+            "received data (in ms). Defaults to 0, which means that all "
+            "connections matching sport/dport will be destroyed\n");
+    fprintf(stdout, "\t-i/--interval : how often to poll for sockets matching "
+            "sport(s)/dport(s) (in sec). If not provded, sockets will be polled "
+            "once and then tcp_closer will exit\n");
     fprintf(stdout, "\t-v/--verbose : More verbose output\n");
     fprintf(stdout, "\t-h/--help : This output\n");
-    fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using SOCK_DESTROY\n");
+    fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using "
+            "SOCK_DESTROY\n");
     fprintf(stdout, "\n");
     fprintf(stdout, "At least one source or destination port must be given.\n"
                     "We will kill connections where the source port is one of\n"
@@ -333,6 +364,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    //Set clock to 0 so we send first dump request right away
+    if (!(ctx->dump_timeout = backend_event_loop_create_timeout(0,
+                                                                dump_timeout_cb,
+                                                                ctx, 0))) {
+        fprintf(stderr, "Failed to create dump timeout\n");
+        return 1;
+    }
+    backend_insert_timeout(ctx->event_loop, ctx->dump_timeout);
+
     if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
                                                             mnl_socket_get_fd(ctx->diag_destroy_socket),
                                                             recv_destroy_msg))) {
@@ -351,6 +391,10 @@ int main(int argc, char *argv[])
     if (!num_sport && !num_dport) {
         fprintf(stderr, "No ports given\n");
         return 1;
+    }
+
+    if (ctx->dump_interval) {
+        ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
     }
 
     fprintf(stdout, "# source ports: %u # destination ports: %u "
@@ -388,13 +432,6 @@ int main(int argc, char *argv[])
     backend_event_loop_update(ctx->event_loop, EPOLLIN, EPOLL_CTL_ADD,
                               mnl_socket_get_fd(ctx->diag_destroy_socket),
                               ctx->destroy_handle);
-
-    //First request is sent right away
-    if (send_diag_msg(ctx) < 0) {
-        fprintf(stderr, "Sending diag message failed with %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
 
     backend_event_loop_run(ctx->event_loop);
 }

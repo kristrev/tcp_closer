@@ -20,6 +20,8 @@
 struct inet_diag_bc_op;
 struct mnl_socket;
 struct backend_event_loop;
+struct backend_epoll_handle;
+struct backend_timeout_handle;
 
 //This is an artifical limitation introduced by me, but is large enough for at
 //least my use-cases. Since there is no EQ operator, we need to check a port for
@@ -38,10 +40,12 @@ struct tcp_closer_ctx {
     struct inet_diag_bc_op *diag_filter;
     struct mnl_socket *diag_dump_socket;
     struct backend_epoll_handle *dump_handle;
+    struct backend_timeout_handle *dump_timeout;
     struct mnl_socket *diag_destroy_socket;
     struct backend_epoll_handle *destroy_handle;
 
     uint32_t diag_filter_len;
+    uint32_t dump_interval;
 
     //Limit for tcpi_last_data_recv before killing socket
     uint16_t idle_time;

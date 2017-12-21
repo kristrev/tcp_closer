@@ -197,7 +197,9 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
 
     while(mnl_nlmsg_ok(nlh, numbytes)){
         if(nlh->nlmsg_type == NLMSG_DONE) {
-            backend_event_loop_stop(ctx->event_loop);
+            if (!ctx->dump_interval) {
+                backend_event_loop_stop(ctx->event_loop);
+            }
             break;
         }
 
