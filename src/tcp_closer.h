@@ -32,43 +32,6 @@ struct mnl_socket;
 //0xFFFF
 #define MAX_NUM_PORTS 128
 
-//There are currently 11 states, but the first state is stored in pos. 1.
-//Therefore, I need a 12 bit bitmask
-#define TCPF_ALL 0xFFF
-
-//Copied from libmnl source
-//TODO: Consider if making use of libmnl makes sense
-#define SOCKET_BUFFER_SIZE (getpagesize() < 8192L ? getpagesize() : 8192L)
-
-//Kernel TCP states. /include/net/tcp_states.h
-enum{
-    TCP_ESTABLISHED = 1,
-    TCP_SYN_SENT,
-    TCP_SYN_RECV,
-    TCP_FIN_WAIT1,
-    TCP_FIN_WAIT2,
-    TCP_TIME_WAIT,
-    TCP_CLOSE,
-    TCP_CLOSE_WAIT,
-    TCP_LAST_ACK,
-    TCP_LISTEN,
-    TCP_CLOSING
-};
-
-static const char* tcp_states_map[]={
-    [TCP_ESTABLISHED] = "ESTABLISHED",
-    [TCP_SYN_SENT] = "SYN-SENT",
-    [TCP_SYN_RECV] = "SYN-RECV",
-    [TCP_FIN_WAIT1] = "FIN-WAIT-1",
-    [TCP_FIN_WAIT2] = "FIN-WAIT-2",
-    [TCP_TIME_WAIT] = "TIME-WAIT",
-    [TCP_CLOSE] = "CLOSE",
-    [TCP_CLOSE_WAIT] = "CLOSE-WAIT",
-    [TCP_LAST_ACK] = "LAST-ACK",
-    [TCP_LISTEN] = "LISTEN",
-    [TCP_CLOSING] = "CLOSING"
-};
-
 static char *inet_diag_op_code_str[] = {
 	"INET_DIAG_BC_NOP",
 	"INET_DIAG_BC_JMP",
