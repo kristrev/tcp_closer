@@ -6,7 +6,7 @@
  * Public License as published by the Free Software Foundation, either version 3
  * of the License, or (at your option) any later version.
  *
- * Usb Montior is distributed in the hope that it will be useful, but WITHOUT ANY
+ * TCP closer is distributed in the hope that it will be useful, but WITHOUT ANY
  * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
  * A PARTICULAR PURPOSE. See the GNU General Public License for more details.
  *
@@ -66,7 +66,6 @@ static void create_filter(int argc, char *argv[], struct tcp_closer_ctx *ctx,
     struct inet_diag_bc_op *diag_sports = ctx->diag_filter;
     struct inet_diag_bc_op *diag_dports = ctx->diag_filter +
                                           (num_sport ? ((num_sport - 1) * 5) + 4 : 0);
-
     uint16_t diag_sports_idx = 0, diag_dports_idx = 0, diag_sports_num = 1,
              diag_dports_num = 1;
 
@@ -331,8 +330,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    fprintf(stdout, "# source ports: %u # destination ports: %u idle time: %ums\n", num_sport,
-            num_dport, ctx->idle_time);
+    fprintf(stdout, "# source ports: %u # destination ports: %u "
+            "idle time: %ums\n", num_sport, num_dport, ctx->idle_time);
 
     //Since there is no equal operator, a port comparison will requires five
     //bc_op-structs. Two for LE (since ports is kept in a second struct), two

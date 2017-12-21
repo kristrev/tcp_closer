@@ -6,7 +6,7 @@
  * Public License as published by the Free Software Foundation, either version 3
  * of the License, or (at your option) any later version.
  *
- * Usb Montior is distributed in the hope that it will be useful, but WITHOUT ANY
+ * TCP closer is distributed in the hope that it will be useful, but WITHOUT ANY
  * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
  * A PARTICULAR PURPOSE. See the GNU General Public License for more details.
  *
@@ -65,7 +65,8 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
     diag_req->idiag_ext |= (1 << (INET_DIAG_INFO - 1));
     diag_req->idiag_states = 1 << TCP_ESTABLISHED;
 
-    mnl_attr_put(nlh, INET_DIAG_REQ_BYTECODE, ctx->diag_filter_len, ctx->diag_filter);
+    mnl_attr_put(nlh, INET_DIAG_REQ_BYTECODE, ctx->diag_filter_len,
+                 ctx->diag_filter);
 
     return mnl_socket_sendto(ctx->diag_dump_socket, diag_buf, nlh->nlmsg_len);
 }
@@ -81,7 +82,8 @@ void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
     //TODO: Add ACK so we can output some sensible error messages
     nlh->nlmsg_flags = NLM_F_REQUEST;
 
-    destroy_req = mnl_nlmsg_put_extra_header(nlh, sizeof(struct inet_diag_req_v2));
+    destroy_req = mnl_nlmsg_put_extra_header(nlh,
+                                             sizeof(struct inet_diag_req_v2));
     //TODO: Add 4/6 flag to command line
     destroy_req->sdiag_family = diag_msg->idiag_family;
     destroy_req->sdiag_protocol = IPPROTO_TCP;
@@ -92,7 +94,8 @@ void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
     mnl_socket_sendto(ctx->diag_destroy_socket, destroy_buf, nlh->nlmsg_len);
 }
 
-static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg,
+static void parse_diag_msg(struct tcp_closer_ctx *ctx,
+                           struct inet_diag_msg *diag_msg,
                            int payload_len)
 {
     struct nlattr *attr;
@@ -137,10 +140,11 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *dia
     //not be send from kernel
 
     if (ctx->verbose_mode) {
-        fprintf(stdout, "Found connection:\nUser: %s (UID: %u) Src: %s:%d Dst: %s:%d\n",
-                uid_info == NULL ? "Not found" : uid_info->pw_name,
-                diag_msg->idiag_uid, local_addr_buf, ntohs(diag_msg->id.idiag_sport),
-                remote_addr_buf, ntohs(diag_msg->id.idiag_dport));
+        fprintf(stdout, "Found connection:\nUser: %s (UID: %u) Src: %s:%d "
+                "Dst: %s:%d\n", uid_info == NULL ? "Not found" : uid_info->pw_name,
+                diag_msg->idiag_uid, local_addr_buf,
+                ntohs(diag_msg->id.idiag_sport), remote_addr_buf,
+                ntohs(diag_msg->id.idiag_dport));
         fprintf(stdout, "\tState: %s RTT: %gms (var. %gms) "
                 "Recv. RTT: %gms Snd_cwnd: %u/%u "
                 "Last_data_recv: %ums ago\n",
@@ -180,7 +184,8 @@ int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
     int32_t numbytes, payload_len;
 
     while(1){
-        numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf, sizeof(recv_buf));
+        numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf,
+                                       sizeof(recv_buf));
         nlh = (struct nlmsghdr*) recv_buf;
 
         while(mnl_nlmsg_ok(nlh, numbytes)){
