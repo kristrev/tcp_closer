@@ -66,35 +66,24 @@ static int send_diag_msg(struct tcp_closer_ctx *ctx)
 
 static void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
 {
-    struct msghdr msg = {0};
-    struct nlmsghdr nlh = {0};
-    struct inet_diag_req_v2 destroy_req = {0};
-    struct sockaddr_nl sa = {0};
-    struct iovec iov[2];
+    uint8_t destroy_buf[MNL_SOCKET_BUFFER_SIZE];
+    struct nlmsghdr *nlh;
+    struct inet_diag_req_v2 *destroy_req;
 
-    nlh.nlmsg_type = SOCK_DESTROY;
-    //Destroying a socket is best-effort only, so no need for ACK
-    nlh.nlmsg_flags = NLM_F_REQUEST;
-    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(destroy_req));
+    nlh = mnl_nlmsg_put_header(destroy_buf);
+    nlh->nlmsg_type = SOCK_DESTROY;
+    //TODO: Add ACK so we can output some sensible error messages
+    nlh->nlmsg_flags = NLM_F_REQUEST;
 
+    destroy_req = mnl_nlmsg_put_extra_header(nlh, sizeof(struct inet_diag_req_v2));
     //TODO: Add 4/6 flag to command line
-    destroy_req.sdiag_family = diag_msg->idiag_family;
-    destroy_req.sdiag_protocol = IPPROTO_TCP;
+    destroy_req->sdiag_family = diag_msg->idiag_family;
+    destroy_req->sdiag_protocol = IPPROTO_TCP;
 
-    //Copy ID from kernel message
-    destroy_req.id = diag_msg->id;
+    //Copy ID from diag_msg returned by kernel
+    destroy_req->id = diag_msg->id;
 
-    sa.nl_family = AF_NETLINK;
-
-    iov[0] = (struct iovec) {&nlh, sizeof(nlh)};
-    iov[1] = (struct iovec) {&destroy_req, sizeof(destroy_req)};
-
-    msg.msg_name = (void*) &sa;
-    msg.msg_namelen = sizeof(sa);
-    msg.msg_iov = iov;
-    msg.msg_iovlen = 2;
-
-    sendmsg(ctx->diag_req_socket, &msg, 0);
+    mnl_socket_sendto(ctx->diag_destroy_socket, destroy_buf, nlh->nlmsg_len);
 }
 
 static void destroy_socket_proc(uint32_t inode_org)
@@ -555,7 +544,14 @@ int main(int argc, char *argv[])
     ctx->use_netlink = true;
 
     if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
-        fprintf(stderr, "Failed to create inet_diag dump socket\n");
+        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
+                strerror(errno), errno);
+        return 1;
+    }
+
+    if (!(ctx->diag_destroy_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
+        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
+                strerror(errno), errno);
         return 1;
     }
 
@@ -575,17 +571,9 @@ int main(int argc, char *argv[])
     fprintf(stdout, "# source ports: %u # destination ports: %u idle time: %ums\n", num_sport,
             num_dport, ctx->idle_time);
 
-    if((ctx->diag_req_socket = socket(AF_NETLINK, SOCK_DGRAM,
-                                      NETLINK_INET_DIAG)) == -1) {
-        fprintf(stderr, "Creating request socket failed with error %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
-
     //Since there is no equal operator, a port comparison will requires five
     //bc_op-structs. Two for LE (since ports is kept in a second struct), two
     //for GE and one for JMP
-
     if (num_sport) {
         ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_sport - 1) +
                                 sizeof(struct inet_diag_bc_op) * 4;

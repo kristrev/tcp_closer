@@ -86,9 +86,9 @@ static char *inet_diag_op_code_str[] = {
 struct tcp_closer_ctx {
     struct inet_diag_bc_op *diag_filter;
     struct mnl_socket *diag_dump_socket;
+    struct mnl_socket *diag_destroy_socket;
 
     uint32_t diag_filter_len;
-    int32_t diag_req_socket;
 
     //Limit for tcpi_last_data_recv before killing socket
     uint16_t idle_time;
