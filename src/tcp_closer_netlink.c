@@ -15,6 +15,20 @@
 #include "tcp_closer_proc.h"
 #include "tcp_closer.h"
 
+static const char* tcp_states_map[] = {
+    [TCP_ESTABLISHED] = "ESTABLISHED",
+    [TCP_SYN_SENT] = "SYN-SENT",
+    [TCP_SYN_RECV] = "SYN-RECV",
+    [TCP_FIN_WAIT1] = "FIN-WAIT-1",
+    [TCP_FIN_WAIT2] = "FIN-WAIT-2",
+    [TCP_TIME_WAIT] = "TIME-WAIT",
+    [TCP_CLOSE] = "CLOSE",
+    [TCP_CLOSE_WAIT] = "CLOSE-WAIT",
+    [TCP_LAST_ACK] = "LAST-ACK",
+    [TCP_LISTEN] = "LISTEN",
+    [TCP_CLOSING] = "CLOSING"
+};
+
 int send_diag_msg(struct tcp_closer_ctx *ctx)
 {
     uint8_t diag_buf[MNL_SOCKET_BUFFER_SIZE];
@@ -66,7 +80,7 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx, struct inet_diag_msg *dia
                            int payload_len)
 {
     struct nlattr *attr;
-    struct tcp_info *tcpi;
+    struct tcp_info *tcpi = NULL;
     char local_addr_buf[INET6_ADDRSTRLEN];
     char remote_addr_buf[INET6_ADDRSTRLEN];
     struct passwd *uid_info = NULL;

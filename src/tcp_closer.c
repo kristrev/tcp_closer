@@ -25,8 +25,22 @@
 #include <linux/inet_diag.h>
 #include <libmnl/libmnl.h>
 
-#include "tcp_closer_netlink.h"
 #include "tcp_closer.h"
+#include "tcp_closer_netlink.h"
+
+static char *inet_diag_op_code_str[] = {
+	"INET_DIAG_BC_NOP",
+	"INET_DIAG_BC_JMP",
+	"INET_DIAG_BC_S_GE",
+	"INET_DIAG_BC_S_LE",
+	"INET_DIAG_BC_D_GE",
+	"INET_DIAG_BC_D_LE",
+	"INET_DIAG_BC_AUTO",
+	"INET_DIAG_BC_S_COND",
+	"INET_DIAG_BC_D_COND",
+	"INET_DIAG_BC_DEV_COND",
+	"INET_DIAG_BC_MARK_COND"
+};
 
 static void output_filter(struct tcp_closer_ctx *ctx)
 {

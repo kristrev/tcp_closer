@@ -20,20 +20,6 @@ enum{
     TCP_CLOSING
 };
 
-static const char* tcp_states_map[]={
-    [TCP_ESTABLISHED] = "ESTABLISHED",
-    [TCP_SYN_SENT] = "SYN-SENT",
-    [TCP_SYN_RECV] = "SYN-RECV",
-    [TCP_FIN_WAIT1] = "FIN-WAIT-1",
-    [TCP_FIN_WAIT2] = "FIN-WAIT-2",
-    [TCP_TIME_WAIT] = "TIME-WAIT",
-    [TCP_CLOSE] = "CLOSE",
-    [TCP_CLOSE_WAIT] = "CLOSE-WAIT",
-    [TCP_LAST_ACK] = "LAST-ACK",
-    [TCP_LISTEN] = "LISTEN",
-    [TCP_CLOSING] = "CLOSING"
-};
-
 struct tcp_closer_ctx;
 struct inet_diag_msg;
 

@@ -32,20 +32,6 @@ struct mnl_socket;
 //0xFFFF
 #define MAX_NUM_PORTS 128
 
-static char *inet_diag_op_code_str[] = {
-	"INET_DIAG_BC_NOP",
-	"INET_DIAG_BC_JMP",
-	"INET_DIAG_BC_S_GE",
-	"INET_DIAG_BC_S_LE",
-	"INET_DIAG_BC_D_GE",
-	"INET_DIAG_BC_D_LE",
-	"INET_DIAG_BC_AUTO",
-	"INET_DIAG_BC_S_COND",
-	"INET_DIAG_BC_D_COND",
-	"INET_DIAG_BC_DEV_COND",
-	"INET_DIAG_BC_MARK_COND"
-};
-
 struct tcp_closer_ctx {
     struct inet_diag_bc_op *diag_filter;
     struct mnl_socket *diag_dump_socket;
