@@ -27,6 +27,7 @@
 
 #include "tcp_closer.h"
 #include "tcp_closer_netlink.h"
+#include "backend_event_loop.h"
 
 static char *inet_diag_op_code_str[] = {
 	"INET_DIAG_BC_NOP",
@@ -305,6 +306,11 @@ int main(int argc, char *argv[])
 
     ctx->use_netlink = true;
 
+    if (!(ctx->event_loop = backend_event_loop_create())) {
+        fprintf(stderr, "Failed to create event loop\n");
+        return 1;
+    }
+
     if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
         fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
                 strerror(errno), errno);
@@ -314,6 +320,20 @@ int main(int argc, char *argv[])
     if (!(ctx->diag_destroy_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
         fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
                 strerror(errno), errno);
+        return 1;
+    }
+
+    if (!(ctx->dump_handle = backend_create_epoll_handle(ctx,
+                                                         mnl_socket_get_fd(ctx->diag_dump_socket),
+                                                         recv_diag_msg))) {
+        fprintf(stderr, "Failed to create diag dump epoll handle\n");
+        return 1;
+    }
+
+    if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
+                                                            mnl_socket_get_fd(ctx->diag_destroy_socket),
+                                                            NULL))) {
+        fprintf(stderr, "Failed to create diag dump epoll handle\n");
         return 1;
     }
 
@@ -358,11 +378,17 @@ int main(int argc, char *argv[])
         output_filter(ctx);
     }
 
+    backend_event_loop_update(ctx->event_loop, EPOLLIN, EPOLL_CTL_ADD,
+                              mnl_socket_get_fd(ctx->diag_dump_socket),
+                              ctx->dump_handle);
+
+
+    //First request is sent right away
     if (send_diag_msg(ctx) < 0) {
         fprintf(stderr, "Sending diag message failed with %s (%u)\n",
                 strerror(errno), errno);
         return 1;
     }
 
-    return recv_diag_msg(ctx);
+    backend_event_loop_run(ctx->event_loop);
 }

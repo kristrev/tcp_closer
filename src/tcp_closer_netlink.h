@@ -40,7 +40,6 @@ struct tcp_closer_ctx;
 struct inet_diag_msg;
 
 int send_diag_msg(struct tcp_closer_ctx *ctx);
-void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg);
-int32_t recv_diag_msg(struct tcp_closer_ctx *ctx);
+void recv_diag_msg(void *data, int32_t fd, uint32_t events);
 
 #endif

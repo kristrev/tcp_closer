@@ -19,6 +19,7 @@
 
 struct inet_diag_bc_op;
 struct mnl_socket;
+struct backend_event_loop;
 
 //This is an artifical limitation introduced by me, but is large enough for at
 //least my use-cases. Since there is no EQ operator, we need to check a port for
@@ -33,9 +34,12 @@ struct mnl_socket;
 #define MAX_NUM_PORTS 128
 
 struct tcp_closer_ctx {
+    struct backend_event_loop *event_loop;
     struct inet_diag_bc_op *diag_filter;
     struct mnl_socket *diag_dump_socket;
+    struct backend_epoll_handle *dump_handle;
     struct mnl_socket *diag_destroy_socket;
+    struct backend_epoll_handle *destroy_handle;
 
     uint32_t diag_filter_len;
 

@@ -30,6 +30,7 @@
 #include "tcp_closer_netlink.h"
 #include "tcp_closer_proc.h"
 #include "tcp_closer.h"
+#include "backend_event_loop.h"
 
 static const char* tcp_states_map[] = {
     [TCP_ESTABLISHED] = "ESTABLISHED",
@@ -71,7 +72,8 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
     return mnl_socket_sendto(ctx->diag_dump_socket, diag_buf, nlh->nlmsg_len);
 }
 
-void destroy_socket(struct tcp_closer_ctx *ctx, struct inet_diag_msg *diag_msg)
+static void destroy_socket(struct tcp_closer_ctx *ctx,
+                           struct inet_diag_msg *diag_msg)
 {
     uint8_t destroy_buf[MNL_SOCKET_BUFFER_SIZE];
     struct nlmsghdr *nlh;
@@ -175,14 +177,16 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx,
     }
 }
 
-int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
+void recv_diag_msg(void *data, int32_t fd, uint32_t events)
 {
+    struct tcp_closer_ctx *ctx = data;
     struct nlmsghdr *nlh;
     struct nlmsgerr *err;
     uint8_t recv_buf[MNL_SOCKET_BUFFER_SIZE];
     struct inet_diag_msg *diag_msg;
     int32_t numbytes, payload_len;
 
+    //TODO: Improve error handling when socket fails/netlink triggers error
     while(1){
         numbytes = mnl_socket_recvfrom(ctx->diag_dump_socket, recv_buf,
                                        sizeof(recv_buf));
@@ -190,7 +194,7 @@ int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
 
         while(mnl_nlmsg_ok(nlh, numbytes)){
             if(nlh->nlmsg_type == NLMSG_DONE) {
-                return 0;
+                break;
             }
 
             if(nlh->nlmsg_type == NLMSG_ERROR){
@@ -199,11 +203,9 @@ int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
                 if (err->error) {
                     fprintf(stderr, "Error in netlink message: %s (%u)\n",
                             strerror(-err->error), -err->error);
-                    return 1;
+                    break;
                 }
             }
-
-            fprintf(stdout, "Got diag msg\n");
 
             //TODO: Switch these to mnl too
             diag_msg = mnl_nlmsg_get_payload(nlh);
@@ -213,6 +215,4 @@ int32_t recv_diag_msg(struct tcp_closer_ctx *ctx)
             nlh = mnl_nlmsg_next(nlh, &numbytes);
         }
     }
-
-    return 0;
 }
