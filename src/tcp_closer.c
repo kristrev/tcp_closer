@@ -33,6 +33,8 @@
 #include "tcp_closer_netlink.h"
 #include "backend_event_loop.h"
 
+static void show_help();
+
 static char *inet_diag_op_code_str[] = {
 	"INET_DIAG_BC_NOP",
 	"INET_DIAG_BC_JMP",
@@ -55,14 +57,14 @@ static void dump_timeout_cb(void *ptr)
 
     if (ctx->dump_in_progress) {
         fprintf(stderr, "Dump in progress\n");
-        //Start some shorter interval
+        //Start some shorter interval?
         return;
     }
 
     if (send_diag_msg(ctx) < 0) {
         fprintf(stderr, "Sending diag message failed with %s (%u)\n",
                 strerror(errno), errno);
-        //Also, start a shorter interval
+        //Start some shorter interval?
     }
 
     ctx->dump_in_progress = true;
@@ -301,6 +303,98 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
     return !error;
 }
 
+static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
+{
+    uint16_t num_sport = 0, num_dport = 0;
+
+    if (!(ctx->event_loop = backend_event_loop_create())) {
+        fprintf(stderr, "Failed to create event loop\n");
+        return false;
+    }
+
+    if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
+        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
+                strerror(errno), errno);
+        return false;
+    }
+
+    if (!(ctx->diag_destroy_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
+        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
+                strerror(errno), errno);
+        return false;
+    }
+
+    mnl_socket_bind(ctx->diag_dump_socket, 0, MNL_SOCKET_AUTOPID);
+    mnl_socket_bind(ctx->diag_destroy_socket, 0, MNL_SOCKET_AUTOPID);
+
+    if (!(ctx->dump_handle = backend_create_epoll_handle(ctx,
+                                                         mnl_socket_get_fd(ctx->diag_dump_socket),
+                                                         recv_diag_msg))) {
+        fprintf(stderr, "Failed to create diag dump epoll handle\n");
+        return false;
+    }
+
+    //Set clock to 0 so we send first dump request right away
+    if (!(ctx->dump_timeout = backend_event_loop_create_timeout(0,
+                                                                dump_timeout_cb,
+                                                                ctx, 0))) {
+        fprintf(stderr, "Failed to create dump timeout\n");
+        return false;
+    }
+    backend_insert_timeout(ctx->event_loop, ctx->dump_timeout);
+
+    if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
+                                                            mnl_socket_get_fd(ctx->diag_destroy_socket),
+                                                            recv_destroy_msg))) {
+        fprintf(stderr, "Failed to create diag dump epoll handle\n");
+        return false;
+    }
+
+    //Parse options and count number of source ports/destination ports. We need
+    //to know the count before we create the filter, so that we can compute the
+    //correct offset for the different operations, etc.
+    if (!parse_cmdargs(argc, argv, &num_sport, &num_dport, ctx)) {
+        show_help();
+        return false;
+    }
+
+    if (!num_sport && !num_dport) {
+        fprintf(stderr, "No ports given\n");
+        return false;
+    }
+
+    if (ctx->dump_interval) {
+        ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
+    }
+
+    fprintf(stdout, "# source ports: %u # destination ports: %u "
+            "idle time: %ums interval: %usec\n", num_sport, num_dport,
+            ctx->idle_time, ctx->dump_interval);
+
+    //Since there is no equal operator, a port comparison will requires five
+    //bc_op-structs. Two for LE (since ports is kept in a second struct), two
+    //for GE and one for JMP
+    if (num_sport) {
+        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_sport - 1) +
+                                sizeof(struct inet_diag_bc_op) * 4;
+    }
+
+    if (num_dport) {
+        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_dport - 1) +
+                                sizeof(struct inet_diag_bc_op) * 4;
+    }
+
+    ctx->diag_filter = calloc(ctx->diag_filter_len, 1);
+    if (!ctx->diag_filter) {
+        fprintf(stderr, "Failed to allocate memory for filter\n");
+        return false;
+    }
+
+    create_filter(argc, argv, ctx, num_sport, num_dport);
+
+    return true;
+}
+
 static void show_help()
 {
     fprintf(stdout, "Following arguments are supported:\n");
@@ -328,7 +422,6 @@ static void show_help()
 int main(int argc, char *argv[])
 {
     struct tcp_closer_ctx *ctx = NULL;
-    uint16_t num_sport = 0, num_dport = 0;
     int lock_fd;
 
     //Parse options, so far it just to get sport and dport
@@ -361,89 +454,9 @@ int main(int argc, char *argv[])
 
     ctx->use_netlink = true;
 
-    if (!(ctx->event_loop = backend_event_loop_create())) {
-        fprintf(stderr, "Failed to create event loop\n");
+    if (!configure(ctx, argc, argv)) {
         return 1;
     }
-
-    if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
-        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
-
-    if (!(ctx->diag_destroy_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
-        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
-
-    mnl_socket_bind(ctx->diag_dump_socket, 0, MNL_SOCKET_AUTOPID);
-    mnl_socket_bind(ctx->diag_destroy_socket, 0, MNL_SOCKET_AUTOPID);
-
-    if (!(ctx->dump_handle = backend_create_epoll_handle(ctx,
-                                                         mnl_socket_get_fd(ctx->diag_dump_socket),
-                                                         recv_diag_msg))) {
-        fprintf(stderr, "Failed to create diag dump epoll handle\n");
-        return 1;
-    }
-
-    //Set clock to 0 so we send first dump request right away
-    if (!(ctx->dump_timeout = backend_event_loop_create_timeout(0,
-                                                                dump_timeout_cb,
-                                                                ctx, 0))) {
-        fprintf(stderr, "Failed to create dump timeout\n");
-        return 1;
-    }
-    backend_insert_timeout(ctx->event_loop, ctx->dump_timeout);
-
-    if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
-                                                            mnl_socket_get_fd(ctx->diag_destroy_socket),
-                                                            recv_destroy_msg))) {
-        fprintf(stderr, "Failed to create diag dump epoll handle\n");
-        return 1;
-    }
-
-    //Parse options and count number of source ports/destination ports. We need
-    //to know the count before we create the filter, so that we can compute the
-    //correct offset for the different operations, etc.
-    if (!parse_cmdargs(argc, argv, &num_sport, &num_dport, ctx)) {
-        show_help();
-        return 1;
-    }
-
-    if (!num_sport && !num_dport) {
-        fprintf(stderr, "No ports given\n");
-        return 1;
-    }
-
-    if (ctx->dump_interval) {
-        ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
-    }
-
-    fprintf(stdout, "# source ports: %u # destination ports: %u "
-            "idle time: %ums\n", num_sport, num_dport, ctx->idle_time);
-
-    //Since there is no equal operator, a port comparison will requires five
-    //bc_op-structs. Two for LE (since ports is kept in a second struct), two
-    //for GE and one for JMP
-    if (num_sport) {
-        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_sport - 1) +
-                                sizeof(struct inet_diag_bc_op) * 4;
-    }
-
-    if (num_dport) {
-        ctx->diag_filter_len += sizeof(struct inet_diag_bc_op) * 5 * (num_dport - 1) +
-                                sizeof(struct inet_diag_bc_op) * 4;
-    }
-
-    ctx->diag_filter = calloc(ctx->diag_filter_len, 1);
-    if (!ctx->diag_filter) {
-        fprintf(stderr, "Failed to allocate memory for filter\n");
-        return 1;
-    }
-
-    create_filter(argc, argv, ctx, num_sport, num_dport);
 
     if (ctx->verbose_mode) {
         output_filter(ctx);
