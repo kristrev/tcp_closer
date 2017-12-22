@@ -24,6 +24,10 @@
 #include <errno.h>
 #include <linux/inet_diag.h>
 #include <libmnl/libmnl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/file.h>
 
 #include "tcp_closer.h"
 #include "tcp_closer_netlink.h"
@@ -325,10 +329,27 @@ int main(int argc, char *argv[])
 {
     struct tcp_closer_ctx *ctx = NULL;
     uint16_t num_sport = 0, num_dport = 0;
+    int lock_fd;
 
     //Parse options, so far it just to get sport and dport
     if (argc < 2) {
         show_help();
+        return 1;
+    }
+
+    //Check if we are running
+    lock_fd = open("/var/run/tcp_closer.pid", O_CREAT | O_WRONLY | O_CLOEXEC,
+                   0666);
+
+    if (lock_fd == -1) {
+        fprintf(stderr, "Failed to open lock-file. Error: %s (%u)\n",
+                strerror(errno), errno);
+        return 1;
+    }
+
+    if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
+        fprintf(stderr, "Failed to obtain file lock. Error: %s (%u)\n",
+                strerror(errno), errno);
         return 1;
     }
 
