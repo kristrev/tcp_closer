@@ -55,7 +55,7 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
     memset(diag_buf, 0, sizeof(diag_buf));
 
     nlh = mnl_nlmsg_put_header(diag_buf);
-    nlh->nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST;
+    nlh->nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST | NLM_F_ACK;
     nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
     nlh->nlmsg_pid = mnl_socket_get_portid(ctx->diag_dump_socket);
 
@@ -197,6 +197,7 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
 
     while(mnl_nlmsg_ok(nlh, numbytes)){
         if(nlh->nlmsg_type == NLMSG_DONE) {
+            ctx->dump_in_progress = false;
             if (!ctx->dump_interval) {
                 backend_event_loop_stop(ctx->event_loop);
             }
@@ -204,14 +205,22 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
         }
 
         if(nlh->nlmsg_type == NLMSG_ERROR){
+            ctx->dump_in_progress = false;
             err = mnl_nlmsg_get_payload(nlh);
 
             if (err->error) {
                 fprintf(stderr, "Error in netlink message: %s (%u)\n",
                         strerror(-err->error), -err->error);
-                break;
+
+                //Only time we can get a netlink error here, is if there is
+                //something wrong with our request. Thus, we should stop loop if
+                //no interval is set
+                if (!ctx->dump_interval) {
+                    backend_event_loop_stop(ctx->event_loop);
+                }
             }
 
+            nlh = mnl_nlmsg_next(nlh, &numbytes);
             continue;
         }
 

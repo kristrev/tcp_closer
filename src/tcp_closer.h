@@ -52,6 +52,7 @@ struct tcp_closer_ctx {
 
     bool verbose_mode;
     bool use_netlink;
+    bool dump_in_progress;
 };
 
 #endif

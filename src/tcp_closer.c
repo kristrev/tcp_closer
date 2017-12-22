@@ -49,16 +49,19 @@ static void dump_timeout_cb(void *ptr)
 
     //Check if dump is in progress
 
+    if (ctx->dump_in_progress) {
+        fprintf(stderr, "Dump in progress\n");
+        //Start some shorter interval
+        return;
+    }
+
     if (send_diag_msg(ctx) < 0) {
         fprintf(stderr, "Sending diag message failed with %s (%u)\n",
                 strerror(errno), errno);
+        //Also, start a shorter interval
     }
 
-#if 0
-    if (ctx->dump_interval) {
-        ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
-    }
-#endif
+    ctx->dump_in_progress = true;
 }
 
 static void output_filter(struct tcp_closer_ctx *ctx)
