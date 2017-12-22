@@ -222,20 +222,22 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
 {
     int opt, option_index;
     bool error = false;
+    const char *logfile = NULL;
 
     struct option long_options[] = {
         {"sport",           required_argument,  NULL,   's'},
         {"dport",           required_argument,  NULL,   'd'},
         {"idle_time",       required_argument,  NULL,   't'},
         {"interval",        required_argument,  NULL,   'i'},
+        {"logfile",         required_argument,  NULL,   'f'},
         {"verbose",         no_argument,        NULL,   'v'},
-        {"help",            required_argument,  NULL,   'h'},
+        {"help",            no_argument,        NULL,   'h'},
         {"use_proc",        no_argument,        NULL,    0 },
         {"disable_syslog",  no_argument,        NULL,    0 },
         {0,                 0,                  0,       0 }
     };
 
-    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:vh", long_options,
+    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:f:vh", long_options,
                                         &option_index)) != -1) {
         switch (opt) {
         case 0:
@@ -288,6 +290,9 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         case 'v':
             ctx->verbose_mode = true;
             break;
+        case 'f':
+            logfile = optarg;
+            break;
         case 'h':
         default:
             error = true;
@@ -306,6 +311,18 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
                                     *num_sport + *num_dport, MAX_NUM_PORTS);
             error = true;
             break;
+        }
+    }
+
+    if (!error && logfile) {
+        ctx->logfile = fopen(logfile, "a");
+
+        if (!ctx->logfile) {
+            ctx->logfile = stderr;
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to open logfile. "
+                                    "Error: %s (%u)\n",
+                                    strerror(errno), errno);
+            error = true;
         }
     }
 
@@ -422,6 +439,7 @@ static void show_help()
     fprintf(stdout, "\t-i/--interval : how often to poll for sockets matching "
             "sport(s)/dport(s) (in sec). If not provded, sockets will be polled "
             "once and then tcp_closer will exit\n");
+    fprintf(stdout, "\t-f/--logfile : Path to logfile (default is stderr)\n");
     fprintf(stdout, "\t-v/--verbose : More verbose output\n");
     fprintf(stdout, "\t-h/--help : This output\n");
     fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using "
