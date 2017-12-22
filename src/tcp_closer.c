@@ -224,14 +224,15 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
     bool error = false;
 
     struct option long_options[] = {
-        {"sport",       required_argument,  NULL,   's'},
-        {"dport",       required_argument,  NULL,   'd'},
-        {"idle_time",   required_argument,  NULL,   't'},
-        {"interval",    required_argument,  NULL,   'i'},
-        {"verbose",     no_argument,        NULL,   'v'},
-        {"help",        required_argument,  NULL,   'h'},
-        {"use_proc",    no_argument,        NULL,    0 },
-        {0,             0,                  0,       0 }
+        {"sport",           required_argument,  NULL,   's'},
+        {"dport",           required_argument,  NULL,   'd'},
+        {"idle_time",       required_argument,  NULL,   't'},
+        {"interval",        required_argument,  NULL,   'i'},
+        {"verbose",         no_argument,        NULL,   'v'},
+        {"help",            required_argument,  NULL,   'h'},
+        {"use_proc",        no_argument,        NULL,    0 },
+        {"disable_syslog",  no_argument,        NULL,    0 },
+        {0,                 0,                  0,       0 }
     };
 
     while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:vh", long_options,
@@ -242,7 +243,11 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             //split handling long options into a separate function
             if (!strcmp("use_proc", long_options[option_index].name)) {
                 ctx->use_netlink = false;
+            } else if (!strcmp("disable_syslog",
+                               long_options[option_index].name)) {
+                ctx->use_syslog = false;
             }
+
             break;
         case 's':
             if (!atoi(optarg)) {
@@ -421,6 +426,7 @@ static void show_help()
     fprintf(stdout, "\t-h/--help : This output\n");
     fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using "
             "SOCK_DESTROY\n");
+    fprintf(stdout, "\t--disable_syslog : Do not write log messages to syslog\n");
     fprintf(stdout, "\n");
     fprintf(stdout, "At least one source or destination port must be given.\n"
                     "We will kill connections where the source port is one of\n"
