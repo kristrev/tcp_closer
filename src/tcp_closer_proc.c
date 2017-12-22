@@ -23,8 +23,10 @@
 #include <unistd.h>
 
 #include "tcp_closer_proc.h"
+#include "tcp_closer.h"
+#include "tcp_closer_log.h"
 
-void destroy_socket_proc(uint32_t inode_org)
+void destroy_socket_proc(struct tcp_closer_ctx *ctx, uint32_t inode_org)
 {
     //Length of /proc/strlen(uint64_max)/fd/d_name (d_name is 256, inc. \0)
     char dir_buf[286];
@@ -38,7 +40,7 @@ void destroy_socket_proc(uint32_t inode_org)
     lProcDir = opendir("/proc");
 
     if (!lProcDir) {
-        fprintf(stderr, "Failed to open /proc\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to open /proc\n");
         return;
     }
 
@@ -54,8 +56,9 @@ void destroy_socket_proc(uint32_t inode_org)
         lProcFdDir = opendir(dir_buf);
 
         if (!lProcFdDir) {
-            fprintf(stderr, "Failed to open: %s. Error: %s (%d)\n", dir_buf,
-                    strerror(errno), errno);
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to open: %s. Error: "
+                                    "%s (%d)\n", dir_buf, strerror(errno),
+                                    errno);
             continue;
         }
 
@@ -69,8 +72,9 @@ void destroy_socket_proc(uint32_t inode_org)
 
             memset(link_buf, 0, sizeof(link_buf));
             if (readlink(dir_buf, link_buf, sizeof(link_buf)) <= 0) {
-                fprintf(stderr, "Failed to read link %s. Error: %s (%d)\n",
-                        dir_buf, strerror(errno), errno);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to read link %s. "
+                                        "Error: %s (%d)\n", dir_buf,
+                                        strerror(errno), errno);
                 continue;
             }
 
@@ -89,7 +93,7 @@ void destroy_socket_proc(uint32_t inode_org)
                 continue;
             }
 
-            fprintf(stdout, "Will kill PID %lu\n", pid);
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_INFO, "Will kill PID %lu\n", pid);
             kill(pid, SIGKILL);
 
             //No need to check any other link in this folder, we have killed

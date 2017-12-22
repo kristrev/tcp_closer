@@ -17,6 +17,9 @@
 #ifndef TCP_CLOSER_H
 #define TCP_CLOSER_H
 
+#include <stdint.h>
+#include <stdbool.h>
+
 struct inet_diag_bc_op;
 struct mnl_socket;
 struct backend_event_loop;
@@ -43,6 +46,7 @@ struct tcp_closer_ctx {
     struct backend_timeout_handle *dump_timeout;
     struct mnl_socket *diag_destroy_socket;
     struct backend_epoll_handle *destroy_handle;
+    FILE *logfile;
 
     uint32_t diag_filter_len;
     uint32_t dump_interval;
@@ -53,6 +57,7 @@ struct tcp_closer_ctx {
     bool verbose_mode;
     bool use_netlink;
     bool dump_in_progress;
+    bool use_syslog;
 };
 
 #endif

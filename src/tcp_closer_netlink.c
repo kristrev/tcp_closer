@@ -31,6 +31,7 @@
 #include "tcp_closer_proc.h"
 #include "tcp_closer.h"
 #include "backend_event_loop.h"
+#include "tcp_closer_log.h"
 
 static const char* tcp_states_map[] = {
     [TCP_ESTABLISHED] = "ESTABLISHED",
@@ -147,21 +148,25 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx,
     //not be send from kernel
 
     if (ctx->verbose_mode) {
-        fprintf(stdout, "Found connection:\nUser: %s (UID: %u) Src: %s:%d "
-                "Dst: %s:%d\n", uid_info == NULL ? "Not found" : uid_info->pw_name,
-                diag_msg->idiag_uid, local_addr_buf,
-                ntohs(diag_msg->id.idiag_sport), remote_addr_buf,
-                ntohs(diag_msg->id.idiag_dport));
-        fprintf(stdout, "\tState: %s RTT: %gms (var. %gms) "
-                "Recv. RTT: %gms Snd_cwnd: %u/%u "
-                "Last_data_recv: %ums ago\n",
-                tcp_states_map[tcpi->tcpi_state],
-                (double) tcpi->tcpi_rtt/1000,
-                (double) tcpi->tcpi_rttvar/1000,
-                (double) tcpi->tcpi_rcv_rtt/1000,
-                tcpi->tcpi_unacked,
-                tcpi->tcpi_snd_cwnd,
-                tcpi->tcpi_last_data_recv);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "Found connection:\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "User: %s (UID: %u) Src: %s:%d "
+                                "Dst: %s:%d\n",
+                                uid_info == NULL ? "Not found" : 
+                                                    uid_info->pw_name,
+                                diag_msg->idiag_uid, local_addr_buf,
+                                ntohs(diag_msg->id.idiag_sport),
+                                remote_addr_buf,
+                                ntohs(diag_msg->id.idiag_dport));
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "\tState: %s RTT: %gms "
+                                "(var. %gms) Recv. RTT: %gms Snd_cwnd: %u/%u "
+                                "Last_data_recv: %ums ago\n",
+                                tcp_states_map[tcpi->tcpi_state],
+                                (double) tcpi->tcpi_rtt/1000,
+                                (double) tcpi->tcpi_rttvar/1000,
+                                (double) tcpi->tcpi_rcv_rtt/1000,
+                                tcpi->tcpi_unacked,
+                                tcpi->tcpi_snd_cwnd,
+                                tcpi->tcpi_last_data_recv);
     }
 
     //tcp_last_ack_recv can be updated by for example a proxy replying to TCP
@@ -171,14 +176,16 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx,
         return;
     }
 
-    fprintf(stdout, "Will destroy src: %s:%d dst: %s:%d last_data_recv: %ums\n",
-            local_addr_buf, ntohs(diag_msg->id.idiag_sport),  remote_addr_buf,
-            ntohs(diag_msg->id.idiag_dport), tcpi->tcpi_last_data_recv);
+    TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_INFO, "Will destroy src: %s:%d dst: %s:%d "
+                            "last_data_recv: %ums\n", local_addr_buf,
+                            ntohs(diag_msg->id.idiag_sport), remote_addr_buf,
+                            ntohs(diag_msg->id.idiag_dport),
+                            tcpi->tcpi_last_data_recv);
 
     if (ctx->use_netlink) {
         destroy_socket(ctx, diag_msg);
     } else {
-        destroy_socket_proc(diag_msg->idiag_inode);
+        destroy_socket_proc(ctx, diag_msg->idiag_inode);
     }
 }
 
@@ -209,8 +216,9 @@ void recv_diag_msg(void *data, int32_t fd, uint32_t events)
             err = mnl_nlmsg_get_payload(nlh);
 
             if (err->error) {
-                fprintf(stderr, "Error in netlink message: %s (%u)\n",
-                        strerror(-err->error), -err->error);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Error in netlink "
+                                        "message (on dump): %s (%u)\n",
+                                        strerror(-err->error), -err->error);
 
                 //Only time we can get a netlink error here, is if there is
                 //something wrong with our request. Thus, we should stop loop if
@@ -249,8 +257,8 @@ void recv_destroy_msg(void *data, int32_t fd, uint32_t events)
         if(nlh->nlmsg_type == NLMSG_DONE) {
             break;
         } else if (nlh->nlmsg_type != NLMSG_ERROR) {
-            fprintf(stdout, "Received unexpected type %u on destroy socket\n",
-                    nlh->nlmsg_type);
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "Received unexpected type "
+                                    "%u on destroy socket\n", nlh->nlmsg_type);
             nlh = mnl_nlmsg_next(nlh, &numbytes);
             continue;
         }
@@ -258,8 +266,9 @@ void recv_destroy_msg(void *data, int32_t fd, uint32_t events)
         err = mnl_nlmsg_get_payload(nlh);
 
         if (err->error) {
-            fprintf(stderr, "Destroying socket failed. Reason: %s (%u)\n",
-                    strerror(-err->error), -err->error);
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Destroying socket failed. "
+                                    "Reason: %s (%u)\n", strerror(-err->error),
+                                    -err->error);
             break;
         }
 

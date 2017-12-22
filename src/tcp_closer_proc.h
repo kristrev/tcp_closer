@@ -19,6 +19,8 @@
 
 #include <stdint.h>
 
-void destroy_socket_proc(uint32_t inode_org);
+struct tcp_closer_ctx;
+
+void destroy_socket_proc(struct tcp_closer_ctx *ctx, uint32_t inode_org);
 
 #endif

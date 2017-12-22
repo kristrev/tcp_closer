@@ -32,6 +32,7 @@
 #include "tcp_closer.h"
 #include "tcp_closer_netlink.h"
 #include "backend_event_loop.h"
+#include "tcp_closer_log.h"
 
 static void show_help();
 
@@ -56,14 +57,14 @@ static void dump_timeout_cb(void *ptr)
     //Check if dump is in progress
 
     if (ctx->dump_in_progress) {
-        fprintf(stderr, "Dump in progress\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_INFO, "Dump in progress\n");
         //Start some shorter interval?
         return;
     }
 
     if (send_diag_msg(ctx) < 0) {
-        fprintf(stderr, "Sending diag message failed with %s (%u)\n",
-                strerror(errno), errno);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Sending diag message failed "
+                                "with %s (%u)\n", strerror(errno), errno);
         //Start some shorter interval?
     }
 
@@ -75,15 +76,16 @@ static void output_filter(struct tcp_closer_ctx *ctx)
     uint16_t num_ops = ctx->diag_filter_len / sizeof(struct inet_diag_bc_op);
     uint16_t i;
 
-    fprintf(stdout, "Content of INET_DIAG filter:\n");
+    TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "Content of INET_DIAG filter:\n");
     for (i = 0; i < num_ops; i++) {
-        fprintf(stdout, "diag_filter[%u]->code = %s\n", i,
-                inet_diag_op_code_str[ctx->diag_filter[i].code]);
-        fprintf(stdout, "diag_filter[%u]->yes = %u\n", i,
-                ctx->diag_filter[i].yes);
-        fprintf(stdout, "diag_filter[%u]->no = %u\n", i,
-                ctx->diag_filter[i].no);
-        fprintf(stdout, "\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "diag_filter[%u]->code = %s\n",
+                                i,
+                                inet_diag_op_code_str[ctx->diag_filter[i].code]);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "diag_filter[%u]->yes = %u\n",
+                                i, ctx->diag_filter[i].yes);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "diag_filter[%u]->no = %u\n", i,
+                                ctx->diag_filter[i].no);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_DEBUG, "\n");
     }
 }
 
@@ -244,8 +246,8 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             break;
         case 's':
             if (!atoi(optarg)) {
-                fprintf(stderr, "Found invalid source port (value %s)\n",
-                        optarg);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Found invalid source "
+                                        "port (value %s)\n", optarg);
                 error = true;
             } else {
                 (*num_sport)++;
@@ -253,8 +255,9 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             break;
         case 'd':
             if (!atoi(optarg)) {
-                fprintf(stderr, "Found invalid destination port (value %s)\n",
-                        optarg);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Found invalid "
+                                        "destination port (value %s)\n",
+                                        optarg);
                 error = true;
             } else {
                 (*num_dport)++;
@@ -262,8 +265,8 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             break;
         case 't':
             if (!atoi(optarg)) {
-                fprintf(stderr, "Found invalid idle time (value %s)\n",
-                        optarg);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Found invalid idle time "
+                                        "(value %s)\n", optarg);
                 error = true;
             } else {
                 ctx->idle_time = atoi(optarg);
@@ -271,8 +274,8 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             break;
         case 'i':
             if (!atoi(optarg)) {
-                fprintf(stderr, "Found invalid dump interval (value %s)\n",
-                        optarg);
+                TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Found invalid dump "
+                                        "interval (value %s)\n", optarg);
             } else {
                 ctx->dump_interval = atoi(optarg);
             }
@@ -293,8 +296,9 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         //iterate over the arguments again and would then try to fit comparing
         //0xFFFF + 1 ports into a buffer meant for one
         if ((*num_sport + *num_dport) > MAX_NUM_PORTS) {
-            fprintf(stderr, "Number of ports (%u) exceeded limit (%u)\n",
-                *num_sport + *num_dport, MAX_NUM_PORTS);
+            TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Number of ports (%u) "
+                                    "exceeded limit (%u)\n", 
+                                    *num_sport + *num_dport, MAX_NUM_PORTS);
             error = true;
             break;
         }
@@ -308,19 +312,21 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
     uint16_t num_sport = 0, num_dport = 0;
 
     if (!(ctx->event_loop = backend_event_loop_create())) {
-        fprintf(stderr, "Failed to create event loop\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create event loop\n");
         return false;
     }
 
     if (!(ctx->diag_dump_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
-        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
-                strerror(errno), errno);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create inet_diag dump "
+                                "socket. Error: %s (%u)\n", strerror(errno),
+                                errno);
         return false;
     }
 
     if (!(ctx->diag_destroy_socket = mnl_socket_open(NETLINK_INET_DIAG))) {
-        fprintf(stderr, "Failed to create inet_diag dump socket. Error: %s (%u)\n",
-                strerror(errno), errno);
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create inet_diag dump "
+                                "socket. Error: %s (%u)\n", strerror(errno),
+                                errno);
         return false;
     }
 
@@ -330,7 +336,8 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
     if (!(ctx->dump_handle = backend_create_epoll_handle(ctx,
                                                          mnl_socket_get_fd(ctx->diag_dump_socket),
                                                          recv_diag_msg))) {
-        fprintf(stderr, "Failed to create diag dump epoll handle\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create diag dump "
+                                "epoll handle\n");
         return false;
     }
 
@@ -338,7 +345,8 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
     if (!(ctx->dump_timeout = backend_event_loop_create_timeout(0,
                                                                 dump_timeout_cb,
                                                                 ctx, 0))) {
-        fprintf(stderr, "Failed to create dump timeout\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create dump "
+                                "timeout\n");
         return false;
     }
     backend_insert_timeout(ctx->event_loop, ctx->dump_timeout);
@@ -346,7 +354,8 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
     if (!(ctx->destroy_handle = backend_create_epoll_handle(ctx,
                                                             mnl_socket_get_fd(ctx->diag_destroy_socket),
                                                             recv_destroy_msg))) {
-        fprintf(stderr, "Failed to create diag dump epoll handle\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to create diag dump "
+                                "epoll handle\n");
         return false;
     }
 
@@ -359,7 +368,7 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
     }
 
     if (!num_sport && !num_dport) {
-        fprintf(stderr, "No ports given\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "No ports given\n");
         return false;
     }
 
@@ -367,9 +376,10 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
         ctx->dump_timeout->intvl = ctx->dump_interval * 1000;
     }
 
-    fprintf(stdout, "# source ports: %u # destination ports: %u "
-            "idle time: %ums interval: %usec\n", num_sport, num_dport,
-            ctx->idle_time, ctx->dump_interval);
+    TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_INFO, "# source ports: %u # destination "
+                            "ports: %u idle time: %ums interval: %usec\n",
+                            num_sport, num_dport, ctx->idle_time,
+                            ctx->dump_interval);
 
     //Since there is no equal operator, a port comparison will requires five
     //bc_op-structs. Two for LE (since ports is kept in a second struct), two
@@ -386,7 +396,8 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
 
     ctx->diag_filter = calloc(ctx->diag_filter_len, 1);
     if (!ctx->diag_filter) {
-        fprintf(stderr, "Failed to allocate memory for filter\n");
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Failed to allocate memory for "
+                                "filter\n");
         return false;
     }
 
@@ -422,27 +433,10 @@ static void show_help()
 int main(int argc, char *argv[])
 {
     struct tcp_closer_ctx *ctx = NULL;
-    int lock_fd;
 
     //Parse options, so far it just to get sport and dport
     if (argc < 2) {
         show_help();
-        return 1;
-    }
-
-    //Check if we are running
-    lock_fd = open("/var/run/tcp_closer.pid", O_CREAT | O_WRONLY | O_CLOEXEC,
-                   0666);
-
-    if (lock_fd == -1) {
-        fprintf(stderr, "Failed to open lock-file. Error: %s (%u)\n",
-                strerror(errno), errno);
-        return 1;
-    }
-
-    if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
-        fprintf(stderr, "Failed to obtain file lock. Error: %s (%u)\n",
-                strerror(errno), errno);
         return 1;
     }
 
@@ -453,6 +447,8 @@ int main(int argc, char *argv[])
     }
 
     ctx->use_netlink = true;
+    ctx->logfile = stderr;
+    ctx->use_syslog = true;
 
     if (!configure(ctx, argc, argv)) {
         return 1;
