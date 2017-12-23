@@ -78,6 +78,7 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
 static void destroy_socket(struct tcp_closer_ctx *ctx,
                            struct inet_diag_msg *diag_msg)
 {
+#ifdef SOCK_DESTROY
     uint8_t destroy_buf[MNL_SOCKET_BUFFER_SIZE];
     struct nlmsghdr *nlh;
     struct inet_diag_req_v2 *destroy_req;
@@ -99,6 +100,7 @@ static void destroy_socket(struct tcp_closer_ctx *ctx,
     destroy_req->id = diag_msg->id;
 
     mnl_socket_sendto(ctx->diag_destroy_socket, destroy_buf, nlh->nlmsg_len);
+#endif
 }
 
 static void parse_diag_msg(struct tcp_closer_ctx *ctx,

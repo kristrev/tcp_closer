@@ -326,6 +326,14 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         }
     }
 
+#ifndef SOCK_DESTROY
+    if (!error && ctx->use_netlink) {
+        TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "SOCK_DESTROY not support. You "
+                                "must set the --use-proc command line "
+                                "argument\n");
+    }
+#endif
+
     return !error;
 }
 
