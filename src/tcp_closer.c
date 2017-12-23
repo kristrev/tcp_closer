@@ -441,12 +441,12 @@ static void show_help()
 {
     fprintf(stdout, "Following arguments are supported:\n");
     fprintf(stdout, "\t-s/--sport : source port to match\n");
-    fprintf(stdout, "\t-d/--dport : destionation port to match\n");
+    fprintf(stdout, "\t-d/--dport : destination port to match\n");
     fprintf(stdout, "\t-t/--idle_time : limit for time since connection last "
             "received data (in ms). Defaults to 0, which means that all "
             "connections matching sport/dport will be destroyed\n");
     fprintf(stdout, "\t-i/--interval : how often to poll for sockets matching "
-            "sport(s)/dport(s) (in sec). If not provded, sockets will be polled "
+            "sport(s)/dport(s) (in sec). If not provided, sockets will be polled "
             "once and then tcp_closer will exit\n");
     fprintf(stdout, "\t-f/--logfile : Path to logfile (default is stderr)\n");
     fprintf(stdout, "\t-v/--verbose : More verbose output\n");
