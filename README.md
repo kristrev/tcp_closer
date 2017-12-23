@@ -51,6 +51,9 @@ application supports the following command line arguments:
 * -h/--help : Show supporter command line arguments.
 * --use\_proc : Find inode in proc + kill instead of using SOCK\_DESTROY.
 * --disable\_syslog : Do not write log messages to syslog.
+* --last\_recv\_limit : Upper limit for last data received (in ms). Defaults to 0
+  and is used to filter out recently established connections. Before data is
+  received, a connection contains a bogus last data received timestamp.
     
 At least one source or destination port must be given. We will kill connections
 where the source port is one of the given source port(s) (if any), and the

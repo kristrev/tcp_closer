@@ -177,6 +177,11 @@ static void parse_diag_msg(struct tcp_closer_ctx *ctx,
         return;
     }
 
+    if (ctx->last_data_recv_limit && tcpi->tcpi_last_data_recv >=
+        ctx->last_data_recv_limit) {
+        return;
+    }
+
     TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_INFO, "Will destroy src: %s:%d dst: %s:%d "
                             "last_data_recv: %ums\n", local_addr_buf,
                             ntohs(diag_msg->id.idiag_sport), remote_addr_buf,

@@ -54,6 +54,13 @@ struct tcp_closer_ctx {
     //Limit for tcpi_last_data_recv before killing socket
     uint32_t idle_time;
 
+    //An (optional) upper limit for last_data_recv. The reason for adding an
+    //upper limit is that last_data_recv contains a bogus value right after
+    //connection enters the ESTABLISHED state (before data is received). On my
+    //machines, last_data_recv is always around 200+ hours. The limit can be
+    //used to ignore such connections.
+    uint32_t last_data_recv_limit;
+
     uint8_t socket_family;
 
     bool verbose_mode;

@@ -234,11 +234,12 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         {"help",            no_argument,        NULL,   'h'},
         {"use_proc",        no_argument,        NULL,    0 },
         {"disable_syslog",  no_argument,        NULL,    0 },
+        {"last_recv_limit", required_argument,  NULL,    0 },
         {0,                 0,                  0,       0 }
     };
 
-    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:f:v46h", long_options,
-                                        &option_index)) != -1) {
+    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:f:v46h",
+                                        long_options, &option_index)) != -1) {
         switch (opt) {
         case 0:
             //TODO: When we add more arguments with only a long option, we will
@@ -248,6 +249,16 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             } else if (!strcmp("disable_syslog",
                                long_options[option_index].name)) {
                 ctx->use_syslog = false;
+            } else if (!strcmp("last_recv_limit",
+                               long_options[option_index].name)) {
+                if (!atoi(optarg)) {
+                    TCP_CLOSER_PRINT_SYSLOG(ctx, LOG_ERR, "Found invalid "
+                                            "last_recv_limit (value %s)\n",
+                                            optarg);
+                    error = true;
+                } else {
+                    ctx->last_data_recv_limit = atoi(optarg);
+                }
             }
 
             break;
@@ -461,6 +472,10 @@ static void show_help()
     fprintf(stdout, "\t--use_proc : Find inode in proc + kill instead of using "
             "SOCK_DESTROY\n");
     fprintf(stdout, "\t--disable_syslog : Do not write log messages to syslog\n");
+    fprintf(stdout, "\t--last_recv_limit : Upper limit for last data received "
+            "(in ms). Defaults to 0 and is used to filter out recently "
+            "established connections. Before data is received, a connection "
+            "contains a bogus last data received timestamp\n");
     fprintf(stdout, "\n");
     fprintf(stdout, "At least one source or destination port must be given.\n"
                     "We will kill connections where the source port is one of\n"
