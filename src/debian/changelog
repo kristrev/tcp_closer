@@ -1,0 +1,5 @@
+tcp-closer (0.1-1) unstable; urgency=low
+
+  * Initial release.
+
+ -- Kristian Evensen <kristian.evensen@gmail.com>  Sat, 23 Dec 2017 14:25:15 +0100
