@@ -13,6 +13,10 @@ set(SOURCE
     backend_event_loop.c
 ) 
 
+if (NO_SOCK_DESTROY)
+    add_definitions(-DNO_SOCK_DESTROY)
+endif()
+
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kristian Evensen <kristian.evensen@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_NAME "tcp-closer")

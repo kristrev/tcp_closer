@@ -78,7 +78,7 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
 static void destroy_socket(struct tcp_closer_ctx *ctx,
                            struct inet_diag_msg *diag_msg)
 {
-#ifdef SOCK_DESTROY
+#ifndef NO_SOCK_DESTROY
     uint8_t destroy_buf[MNL_SOCKET_BUFFER_SIZE];
     struct nlmsghdr *nlh;
     struct inet_diag_req_v2 *destroy_req;

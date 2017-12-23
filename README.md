@@ -28,6 +28,10 @@ for building, enter this directory and run `cmake .. && make`. If you want to
 build a Debian-package, you can run `make package` instead. The only dependency
 of tcp\_closer is libmnl.
 
+On machines without SOCK\_DESTROY, NO\_SOCK\_DESTROY must be set to one when
+running cmake. I.e., the command will typically be `cmake ..
+-DNO_SOCK_DESTROY=1`.
+
 ## How to run
 
 tcp\_closer must be run as root in order for destroying sockets to work, and the
