@@ -54,6 +54,8 @@ struct tcp_closer_ctx {
     //Limit for tcpi_last_data_recv before killing socket
     uint32_t idle_time;
 
+    uint8_t socket_family;
+
     bool verbose_mode;
     bool use_netlink;
     bool dump_in_progress;

@@ -33,7 +33,7 @@ of tcp\_closer is libmnl.
 tcp\_closer must be run as root in order for destroying sockets to work, and the
 application supports the following command line arguments:
 
-
+* -4/-6 : Match IPv4/v6 sockets (default v4).
 * -s/--sport : source port to match.
 * -d/--dport : destination port to match.
 * -t/--idle\_time : limit for time since connection last received data (in ms).

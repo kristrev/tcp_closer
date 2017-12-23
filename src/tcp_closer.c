@@ -237,7 +237,7 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
         {0,                 0,                  0,       0 }
     };
 
-    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:f:vh", long_options,
+    while (!error && (opt = getopt_long(argc, argv, "s:d:t:i:f:v46h", long_options,
                                         &option_index)) != -1) {
         switch (opt) {
         case 0:
@@ -292,6 +292,12 @@ static bool parse_cmdargs(int argc, char *argv[], uint16_t *num_sport,
             break;
         case 'f':
             logfile = optarg;
+            break;
+        case '4':
+            ctx->socket_family = AF_INET;
+            break;
+        case '6':
+            ctx->socket_family = AF_INET6;
             break;
         case 'h':
         default:
@@ -440,6 +446,7 @@ static bool configure(struct tcp_closer_ctx *ctx, int argc, char *argv[])
 static void show_help()
 {
     fprintf(stdout, "Following arguments are supported:\n");
+    fprintf(stdout, "\t-4/-6 : Matc IPv4/v6 sockets (default v4)\n");
     fprintf(stdout, "\t-s/--sport : source port to match\n");
     fprintf(stdout, "\t-d/--dport : destination port to match\n");
     fprintf(stdout, "\t-t/--idle_time : limit for time since connection last "
@@ -482,6 +489,7 @@ int main(int argc, char *argv[])
     ctx->use_netlink = true;
     ctx->logfile = stderr;
     ctx->use_syslog = true;
+    ctx->socket_family = AF_INET;
 
     if (!configure(ctx, argc, argv)) {
         return 1;

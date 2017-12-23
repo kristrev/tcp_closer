@@ -61,7 +61,7 @@ int send_diag_msg(struct tcp_closer_ctx *ctx)
 
     diag_req = mnl_nlmsg_put_extra_header(nlh, sizeof(struct inet_diag_req_v2));
     //TODO: Add a -4/-6 command line option
-    diag_req->sdiag_family = AF_INET;
+    diag_req->sdiag_family = ctx->socket_family;
     diag_req->sdiag_protocol = IPPROTO_TCP;
 
     //We are only interested in established connections and need the tcp-info
