@@ -1,0 +1,9 @@
+/var/log/tcp_closer.log {
+	su root root
+	rotate 3
+	daily
+	size 5M
+	compress
+	notifempty
+	copytruncate
+}

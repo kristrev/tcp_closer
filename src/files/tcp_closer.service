@@ -1,0 +1,12 @@
+[Install]
+WantedBy=network.target
+
+[Unit]
+Description=TCP closer
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+ExecStart=/usr/sbin/tcp_closer -s 22 -t 60000 -i 5 -f /var/log/tcp_closer.log --use_proc
+Type=simple
+Restart=on-failure
