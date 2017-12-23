@@ -52,7 +52,7 @@ struct tcp_closer_ctx {
     uint32_t dump_interval;
 
     //Limit for tcpi_last_data_recv before killing socket
-    uint16_t idle_time;
+    uint32_t idle_time;
 
     bool verbose_mode;
     bool use_netlink;
