@@ -22,7 +22,6 @@
 #include <linux/sock_diag.h>
 #include <linux/inet_diag.h>
 #include <arpa/inet.h>
-#include <linux/in.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <linux/tcp.h>
