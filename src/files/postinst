@@ -1,0 +1,5 @@
+#!/bin/bash
+
+systemctl daemon-reload && \
+systemctl enable tcp_closer && \
+systemctl restart tcp_closer || true
