@@ -1,4 +1,4 @@
-/var/log/tcp_closer.log {
+/var/log/tcp-closer.log {
 	su root root
 	rotate 3
 	daily

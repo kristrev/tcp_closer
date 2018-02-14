@@ -7,6 +7,6 @@ Before=network-pre.target
 Wants=network-pre.target
 
 [Service]
-ExecStart=/usr/sbin/tcp_closer -s 22 -t 60000 -i 5 -f /var/log/tcp_closer.log --use_proc --last_recv_limit 10800000
+ExecStart=/usr/sbin/tcp-closer -s 22 -t 60000 -i 5 -f /var/log/tcp-closer.log --use_proc --last_recv_limit 10800000
 Type=simple
 Restart=on-failure
